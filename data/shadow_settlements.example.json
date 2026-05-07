@@ -1,0 +1,16 @@
+[
+  {
+    "slug": "new-playboi-carti-album-before-gta-vi-421",
+    "winning_side": "BUY_NO",
+    "settled_at_utc": "2026-07-31T00:00:00+00:00",
+    "note": "Example only. Replace with the final resolved side after market settlement."
+  },
+  {
+    "slug": "will-openai-not-ipo-by-december-31-2026",
+    "side": "BUY_NO",
+    "status": "closed",
+    "close_price": 0.42,
+    "closed_at_utc": "2026-05-15T00:00:00+00:00",
+    "note": "Example manual close price for replay."
+  }
+]

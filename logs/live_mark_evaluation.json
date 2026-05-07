@@ -1,0 +1,40 @@
+{
+  "generated_at_utc": "2026-04-29T08:27:43.352295+00:00",
+  "source": "Polymarket Gamma API + CLOB book API",
+  "settled_fill_count": 0,
+  "open_fill_count": 2,
+  "record_count": 2,
+  "total_live_mark_pnl": 0.03,
+  "records": [
+    {
+      "fill_id": 9,
+      "opened_at_utc": "2026-04-27T04:49:37.601775+00:00",
+      "slug": "new-playboi-carti-album-before-gta-vi-421",
+      "side": "BUY_NO",
+      "active": true,
+      "closed": false,
+      "end_date": "2026-07-31T12:00:00Z",
+      "fill_price": 0.46,
+      "live_bid": 0.46,
+      "live_ask": 0.48,
+      "live_mark": 0.47,
+      "mark_source": "clob_mid",
+      "pnl": 0.01
+    },
+    {
+      "fill_id": 10,
+      "opened_at_utc": "2026-04-27T04:49:37.601783+00:00",
+      "slug": "will-openai-not-ipo-by-december-31-2026",
+      "side": "BUY_NO",
+      "active": true,
+      "closed": false,
+      "end_date": "2026-06-30T00:00:00Z",
+      "fill_price": 0.32,
+      "live_bid": 0.33,
+      "live_ask": 0.35,
+      "live_mark": 0.34,
+      "mark_source": "clob_mid",
+      "pnl": 0.02
+    }
+  ]
+}

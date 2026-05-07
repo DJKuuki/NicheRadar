@@ -1,0 +1,86 @@
+{
+  "generated_at_utc": "2026-04-29T08:26:30.053132+00:00",
+  "record_count": 2,
+  "records": [
+    {
+      "fill_id": 9,
+      "slug": "new-playboi-carti-album-before-gta-vi-421",
+      "label": "Playboi Carti new album before GTA VI",
+      "market_id": "540818",
+      "event_type": "content_release",
+      "platform": "streaming",
+      "side": "BUY_NO",
+      "status": "open_marked",
+      "opened_at_utc": "2026-04-27T04:49:37.601775+00:00",
+      "closed_at_utc": null,
+      "fill_price": 0.46,
+      "current_price": 0.455,
+      "pnl": -0.005,
+      "pnl_pct": -0.01087,
+      "max_entry_price": 0.4725,
+      "net_edge": 0.0175,
+      "close_source": "latest_mark",
+      "settlement_note": null
+    },
+    {
+      "fill_id": 10,
+      "slug": "will-openai-not-ipo-by-december-31-2026",
+      "label": "OpenAI no IPO by Dec 31 2026",
+      "market_id": "608368",
+      "event_type": "ipo_event",
+      "platform": "openai",
+      "side": "BUY_NO",
+      "status": "open_marked",
+      "opened_at_utc": "2026-04-27T04:49:37.601783+00:00",
+      "closed_at_utc": null,
+      "fill_price": 0.32,
+      "current_price": 0.31,
+      "pnl": -0.01,
+      "pnl_pct": -0.03125,
+      "max_entry_price": 0.4874,
+      "net_edge": 0.1774,
+      "close_source": "latest_mark",
+      "settlement_note": null
+    }
+  ],
+  "summary_by_event_type": [
+    {
+      "event_type": "content_release",
+      "count": 1,
+      "open_count": 1,
+      "closed_count": 0,
+      "marked_count": 1,
+      "total_pnl": -0.005,
+      "avg_pnl": -0.005,
+      "win_rate": 0.0,
+      "realized_pnl": 0,
+      "unrealized_pnl": -0.005
+    },
+    {
+      "event_type": "ipo_event",
+      "count": 1,
+      "open_count": 1,
+      "closed_count": 0,
+      "marked_count": 1,
+      "total_pnl": -0.01,
+      "avg_pnl": -0.01,
+      "win_rate": 0.0,
+      "realized_pnl": 0,
+      "unrealized_pnl": -0.01
+    }
+  ],
+  "summary_by_status": [
+    {
+      "status": "open_marked",
+      "count": 2,
+      "open_count": 2,
+      "closed_count": 0,
+      "marked_count": 2,
+      "total_pnl": -0.015,
+      "avg_pnl": -0.0075,
+      "win_rate": 0.0,
+      "realized_pnl": 0,
+      "unrealized_pnl": -0.015
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+[
+  {
+    "market_id": "mkt-001",
+    "title": "Will ArtistA announce a new album on X before May 5?",
+    "description": "Resolves YES if ArtistA posts an explicit new album announcement on X before May 5, 2026 23:59 UTC.",
+    "rules": "Only official ArtistA X account counts.",
+    "category": "social",
+    "closes_at": "2026-05-05T23:59:00+00:00",
+    "volume": 4200,
+    "yes_bid": 0.39,
+    "yes_ask": 0.43,
+    "no_bid": 0.57,
+    "no_ask": 0.61,
+    "metadata": {
+      "subject": "ArtistA",
+      "preheat_score": 0.85,
+      "cadence_score": 0.75,
+      "partner_score": 0.6,
+      "source_reliability": 0.9
+    }
+  },
+  {
+    "market_id": "mkt-002",
+    "title": "Will CreatorB upload a new YouTube video before May 3?",
+    "description": "Resolves YES if CreatorB uploads a full-length video to the official YouTube channel before the deadline.",
+    "rules": "Shorts do not count.",
+    "category": "social",
+    "closes_at": "2026-05-03T23:59:00+00:00",
+    "volume": 980,
+    "yes_bid": 0.68,
+    "yes_ask": 0.76,
+    "no_bid": 0.24,
+    "no_ask": 0.32,
+    "metadata": {
+      "subject": "CreatorB",
+      "preheat_score": 0.2,
+      "cadence_score": 0.3,
+      "partner_score": 0.0,
+      "source_reliability": 0.7
+    }
+  },
+  {
+    "market_id": "mkt-003",
+    "title": "Will TokenX close above $120 this Friday?",
+    "description": "Crypto price market.",
+    "rules": "Resolution source is exchange close price.",
+    "category": "crypto",
+    "closes_at": "2026-05-01T23:59:00+00:00",
+    "volume": 55000,
+    "yes_bid": 0.49,
+    "yes_ask": 0.5,
+    "no_bid": 0.5,
+    "no_ask": 0.51,
+    "metadata": {}
+  }
+]

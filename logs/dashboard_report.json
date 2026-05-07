@@ -1,0 +1,441 @@
+{
+  "generated_at_utc": "2026-04-29T08:26:30.034044+00:00",
+  "db_path": "logs/watchlist.sqlite",
+  "counts": {
+    "snapshots": 72,
+    "markets": 6,
+    "alerts": 5,
+    "shadow_fills": 2,
+    "shadow_positions": 2
+  },
+  "latest_snapshot_time_utc": "2026-04-27T05:41:32.576852+00:00",
+  "edge_by_event_type": [
+    {
+      "event_type": "content_release",
+      "count": 61,
+      "signal_ok_count": 48,
+      "market_ok_count": 55,
+      "avg_net_edge": 0.0614,
+      "max_net_edge": 0.5544,
+      "avg_evidence_score": 0.4063
+    },
+    {
+      "event_type": "ipo_event",
+      "count": 11,
+      "signal_ok_count": 11,
+      "market_ok_count": 11,
+      "avg_net_edge": 0.1633,
+      "max_net_edge": 0.1774,
+      "avg_evidence_score": 0.78
+    }
+  ],
+  "latest_markets": [
+    {
+      "slug": "new-playboi-carti-album-before-gta-vi-421",
+      "label": "Playboi Carti new album before GTA VI",
+      "event_type": "content_release",
+      "platform": "streaming",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.455,
+      "net_edge": 0.0645,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.08,
+      "p_model": 0.4305
+    },
+    {
+      "slug": "new-rhianna-album-before-gta-vi-926",
+      "label": "Rihanna new album before GTA VI",
+      "event_type": "content_release",
+      "platform": "streaming",
+      "preferred_side": "BUY_YES",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.585,
+      "net_edge": 0.0547,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.325,
+      "p_model": 0.4803
+    },
+    {
+      "slug": "will-apple-release-a-macbook-with-cellular-connectivity-by-june-30",
+      "label": "Apple cellular MacBook by Jun 30",
+      "event_type": "content_release",
+      "platform": "apple",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_YES",
+      "preferred_price": 0.9725,
+      "net_edge": 0.0486,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.6925,
+      "p_model": 0.1266
+    },
+    {
+      "slug": "will-gpt-6-be-released",
+      "label": "GPT-6 before GTA VI",
+      "event_type": "content_release",
+      "platform": "openai",
+      "preferred_side": "BUY_YES",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.605,
+      "net_edge": 0.0095,
+      "signal_ok": false,
+      "market_ok": true,
+      "evidence_score": 0.3525,
+      "p_model": 0.5455
+    },
+    {
+      "slug": "will-openai-not-ipo-by-december-31-2026",
+      "label": "OpenAI no IPO by Dec 31 2026",
+      "event_type": "ipo_event",
+      "platform": "openai",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.31,
+      "net_edge": 0.1557,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.78,
+      "p_model": 0.4843
+    },
+    {
+      "slug": "will-tesla-release-optimus-by-june-30-2026",
+      "label": "Tesla Optimus release by Jun 30 2026",
+      "event_type": "content_release",
+      "platform": "tesla",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_YES",
+      "preferred_price": 0.956,
+      "net_edge": 0.0358,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.78,
+      "p_model": 0.1298
+    }
+  ],
+  "top_edges": [
+    {
+      "slug": "will-openai-not-ipo-by-december-31-2026",
+      "label": "OpenAI no IPO by Dec 31 2026",
+      "event_type": "ipo_event",
+      "platform": "openai",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.31,
+      "net_edge": 0.1557,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.78,
+      "p_model": 0.4843
+    },
+    {
+      "slug": "new-playboi-carti-album-before-gta-vi-421",
+      "label": "Playboi Carti new album before GTA VI",
+      "event_type": "content_release",
+      "platform": "streaming",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.455,
+      "net_edge": 0.0645,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.08,
+      "p_model": 0.4305
+    },
+    {
+      "slug": "new-rhianna-album-before-gta-vi-926",
+      "label": "Rihanna new album before GTA VI",
+      "event_type": "content_release",
+      "platform": "streaming",
+      "preferred_side": "BUY_YES",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.585,
+      "net_edge": 0.0547,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.325,
+      "p_model": 0.4803
+    },
+    {
+      "slug": "will-apple-release-a-macbook-with-cellular-connectivity-by-june-30",
+      "label": "Apple cellular MacBook by Jun 30",
+      "event_type": "content_release",
+      "platform": "apple",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_YES",
+      "preferred_price": 0.9725,
+      "net_edge": 0.0486,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.6925,
+      "p_model": 0.1266
+    },
+    {
+      "slug": "will-tesla-release-optimus-by-june-30-2026",
+      "label": "Tesla Optimus release by Jun 30 2026",
+      "event_type": "content_release",
+      "platform": "tesla",
+      "preferred_side": "BUY_NO",
+      "model_side": "BUY_YES",
+      "preferred_price": 0.956,
+      "net_edge": 0.0358,
+      "signal_ok": true,
+      "market_ok": true,
+      "evidence_score": 0.78,
+      "p_model": 0.1298
+    },
+    {
+      "slug": "will-gpt-6-be-released",
+      "label": "GPT-6 before GTA VI",
+      "event_type": "content_release",
+      "platform": "openai",
+      "preferred_side": "BUY_YES",
+      "model_side": "BUY_NO",
+      "preferred_price": 0.605,
+      "net_edge": 0.0095,
+      "signal_ok": false,
+      "market_ok": true,
+      "evidence_score": 0.3525,
+      "p_model": 0.5455
+    }
+  ],
+  "alert_summary": [
+    {
+      "reason": "signal_turned_ok",
+      "count": 4
+    },
+    {
+      "reason": "entered_target_band",
+      "count": 1
+    }
+  ],
+  "recent_alerts": [
+    {
+      "timestamp_utc": "2026-04-27T05:31:14.593020+00:00",
+      "slug": "will-gpt-6-be-released",
+      "label": "GPT-6 before GTA VI",
+      "alert_reasons": [
+        "signal_turned_ok"
+      ]
+    },
+    {
+      "timestamp_utc": "2026-04-27T05:12:53.714073+00:00",
+      "slug": "will-apple-release-a-macbook-with-cellular-connectivity-by-june-30",
+      "label": "Apple cellular MacBook by Jun 30",
+      "alert_reasons": [
+        "entered_target_band"
+      ]
+    },
+    {
+      "timestamp_utc": "2026-04-27T05:10:32.629843+00:00",
+      "slug": "new-rhianna-album-before-gta-vi-926",
+      "label": "Rihanna new album before GTA VI",
+      "alert_reasons": [
+        "signal_turned_ok"
+      ]
+    },
+    {
+      "timestamp_utc": "2026-04-27T04:35:04.669045+00:00",
+      "slug": "new-rhianna-album-before-gta-vi-926",
+      "label": "Rihanna new album before GTA VI",
+      "alert_reasons": [
+        "signal_turned_ok"
+      ]
+    },
+    {
+      "timestamp_utc": "2026-04-27T04:35:04.669035+00:00",
+      "slug": "new-playboi-carti-album-before-gta-vi-421",
+      "label": "Playboi Carti new album before GTA VI",
+      "alert_reasons": [
+        "signal_turned_ok"
+      ]
+    }
+  ],
+  "shadow_summary_by_event_type": [
+    {
+      "event_type": "content_release",
+      "count": 1,
+      "open_count": 1,
+      "closed_count": 0,
+      "marked_count": 1,
+      "total_pnl": -0.005,
+      "avg_pnl": -0.005,
+      "win_rate": 0.0,
+      "realized_pnl": 0,
+      "unrealized_pnl": -0.005
+    },
+    {
+      "event_type": "ipo_event",
+      "count": 1,
+      "open_count": 1,
+      "closed_count": 0,
+      "marked_count": 1,
+      "total_pnl": -0.01,
+      "avg_pnl": -0.01,
+      "win_rate": 0.0,
+      "realized_pnl": 0,
+      "unrealized_pnl": -0.01
+    }
+  ],
+  "shadow_positions": [
+    {
+      "fill_id": 9,
+      "slug": "new-playboi-carti-album-before-gta-vi-421",
+      "label": "Playboi Carti new album before GTA VI",
+      "market_id": "540818",
+      "event_type": "content_release",
+      "platform": "streaming",
+      "side": "BUY_NO",
+      "status": "open_marked",
+      "opened_at_utc": "2026-04-27T04:49:37.601775+00:00",
+      "closed_at_utc": null,
+      "fill_price": 0.46,
+      "current_price": 0.455,
+      "pnl": -0.005,
+      "pnl_pct": -0.01087,
+      "max_entry_price": 0.4725,
+      "net_edge": 0.0175,
+      "close_source": "latest_mark",
+      "settlement_note": null
+    },
+    {
+      "fill_id": 10,
+      "slug": "will-openai-not-ipo-by-december-31-2026",
+      "label": "OpenAI no IPO by Dec 31 2026",
+      "market_id": "608368",
+      "event_type": "ipo_event",
+      "platform": "openai",
+      "side": "BUY_NO",
+      "status": "open_marked",
+      "opened_at_utc": "2026-04-27T04:49:37.601783+00:00",
+      "closed_at_utc": null,
+      "fill_price": 0.32,
+      "current_price": 0.31,
+      "pnl": -0.01,
+      "pnl_pct": -0.03125,
+      "max_entry_price": 0.4874,
+      "net_edge": 0.1774,
+      "close_source": "latest_mark",
+      "settlement_note": null
+    }
+  ],
+  "backtest_summary": {
+    "samples": 72,
+    "settled_samples": 0,
+    "settled_sample_coverage": 0.0,
+    "mark_only_samples": 2,
+    "shadow_fills": 20,
+    "total_pnl": -0.145,
+    "avg_pnl": -0.0072,
+    "win_rate": 0.0,
+    "brier_score": 0.0274,
+    "market_mid_brier_score": 0.0,
+    "log_loss": 0.5866,
+    "calibration_error": 0.0269,
+    "reliability_status": "insufficient"
+  },
+  "backtest_target_source_counts": {
+    "snapshot_mid": 70,
+    "latest_mark": 2
+  },
+  "backtest_calibration_by_profile": [
+    {
+      "model_profile": "default_content",
+      "count": 12,
+      "settled": 0,
+      "avg_p_model": 0.5455,
+      "observed_yes_rate": 0.605,
+      "error": 0.0595,
+      "brier": 0.0035
+    },
+    {
+      "model_profile": "ipo_event",
+      "count": 11,
+      "settled": 0,
+      "avg_p_model": 0.4767,
+      "observed_yes_rate": 0.69,
+      "error": 0.2133,
+      "brier": 0.0462
+    },
+    {
+      "model_profile": "music_release",
+      "count": 26,
+      "settled": 0,
+      "avg_p_model": 0.4888,
+      "observed_yes_rate": 0.565,
+      "error": 0.0762,
+      "brier": 0.0063
+    },
+    {
+      "model_profile": "product_release",
+      "count": 23,
+      "settled": 0,
+      "avg_p_model": 0.1985,
+      "observed_yes_rate": 0.0636,
+      "error": -0.1349,
+      "brier": 0.0546
+    }
+  ],
+  "backtest_pnl_by_profile": [
+    {
+      "model_profile": "default_content",
+      "fills": 0,
+      "total_pnl": 0.0,
+      "avg_pnl": null,
+      "win_rate": null,
+      "max_drawdown": null,
+      "avg_entry_price": null,
+      "avg_exit_price": null
+    },
+    {
+      "model_profile": "ipo_event",
+      "fills": 9,
+      "total_pnl": -0.09,
+      "avg_pnl": -0.01,
+      "win_rate": 0.0,
+      "max_drawdown": -0.09,
+      "avg_entry_price": 0.32,
+      "avg_exit_price": 0.31
+    },
+    {
+      "model_profile": "music_release",
+      "fills": 11,
+      "total_pnl": -0.055,
+      "avg_pnl": -0.005,
+      "win_rate": 0.0,
+      "max_drawdown": -0.055,
+      "avg_entry_price": 0.46,
+      "avg_exit_price": 0.455
+    },
+    {
+      "model_profile": "product_release",
+      "fills": 0,
+      "total_pnl": 0.0,
+      "avg_pnl": null,
+      "win_rate": null,
+      "max_drawdown": null,
+      "avg_entry_price": null,
+      "avg_exit_price": null
+    }
+  ],
+  "portfolio_risk": {
+    "bankroll": 1000.0,
+    "open_positions": 2,
+    "total_exposure": 40.0,
+    "total_exposure_pct": 0.04,
+    "unrealized_pnl": -0.8424,
+    "unrealized_pnl_pct": -0.000842,
+    "circuit_breaker_active": false,
+    "circuit_breaker_reasons": [],
+    "exposure_by_event_type": {
+      "content_release": 20.0,
+      "ipo_event": 20.0
+    },
+    "exposure_by_slug": {
+      "new-playboi-carti-album-before-gta-vi-421": 20.0,
+      "will-openai-not-ipo-by-december-31-2026": 20.0
+    }
+  }
+}

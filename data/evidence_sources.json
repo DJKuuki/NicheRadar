@@ -1,0 +1,66 @@
+[
+  {
+    "subject": "GPT-6",
+    "platform": "openai",
+    "source_type": "rss",
+    "url": "https://openai.com/news/rss.xml",
+    "keywords": ["gpt-6", "gpt 6", "chatgpt 6", "next-generation model", "successor to gpt-5"],
+    "reliability": 0.95
+  },
+  {
+    "subject": "Drake",
+    "platform": "streaming",
+    "source_type": "rss",
+    "url": "https://news.google.com/rss/search?q=Drake+Iceman+album&hl=en-US&gl=US&ceid=US:en",
+    "keywords": ["iceman", "album", "release date", "spotify", "apple music", "streaming"],
+    "reliability": 0.75
+  },
+  {
+    "subject": "Rihanna",
+    "platform": "streaming",
+    "source_type": "rss",
+    "url": "https://news.google.com/rss/search?q=Rihanna+new+album+OR+R9&hl=en-US&gl=US&ceid=US:en",
+    "keywords": ["new album", "r9", "studio", "new music", "release"],
+    "reliability": 0.7
+  },
+  {
+    "subject": "Playboi Carti",
+    "platform": "streaming",
+    "source_type": "rss",
+    "url": "https://news.google.com/rss/search?q=Playboi+Carti+new+album&hl=en-US&gl=US&ceid=US:en",
+    "keywords": ["new album", "release", "new music", "upcoming album"],
+    "reliability": 0.68
+  },
+  {
+    "subject": "OpenAI",
+    "platform": "openai",
+    "source_type": "rss",
+    "url": "https://news.google.com/rss/search?q=OpenAI+IPO+2026&hl=en-US&gl=US&ceid=US:en",
+    "keywords": ["ipo", "initial public offering", "listing", "file", "market cap", "valuation"],
+    "reliability": 0.78
+  },
+  {
+    "subject": "Tesla",
+    "platform": "tesla",
+    "source_type": "rss",
+    "url": "https://news.google.com/rss/search?q=Tesla+Optimus+release+June+2026&hl=en-US&gl=US&ceid=US:en",
+    "keywords": ["optimus", "release", "production", "commercial", "humanoid robot"],
+    "reliability": 0.72
+  },
+  {
+    "subject": "Apple",
+    "platform": "apple",
+    "source_type": "rss",
+    "url": "https://news.google.com/rss/search?q=Apple+MacBook+cellular+connectivity+2026&hl=en-US&gl=US&ceid=US:en",
+    "keywords": ["macbook", "cellular", "5g", "modem", "connectivity", "release"],
+    "reliability": 0.72
+  },
+  {
+    "subject": "OpenAI",
+    "platform": "youtube",
+    "source_type": "rss",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCXZCJLdBC09xxGZ6gcdrc6A",
+    "keywords": ["gpt", "openai", "launch", "release", "demo"],
+    "reliability": 0.9
+  }
+]

@@ -1,0 +1,73 @@
+{
+  "generated_at_utc": "2026-04-27T07:48:12.561788+00:00",
+  "db_path": "logs/watchlist.sqlite",
+  "min_samples": 5,
+  "sample_count": 2,
+  "target_source_counts": {
+    "latest_mark": 2
+  },
+  "profiles": [
+    {
+      "profile": "ipo_event",
+      "sample_count": 1,
+      "status": "insufficient_samples",
+      "target_source_counts": {
+        "latest_mark": 1
+      },
+      "event_type_counts": {
+        "ipo_event": 1
+      },
+      "action_counts": {
+        "not_ipo": 1
+      },
+      "avg_p_model": 0.4626,
+      "avg_target_yes_probability": 0.69,
+      "calibration_error": 0.2274,
+      "brier_score": 0.0517,
+      "current_profile": {
+        "base_logit": -1.25,
+        "negated_action_base_logit": 0.65,
+        "evidence_weight": 0.95,
+        "preheat_weight": 0.5,
+        "cadence_weight": 0.25,
+        "partner_weight": 0.25,
+        "time_weight": 0.6,
+        "spread_penalty_weight": 0.55
+      },
+      "suggested_profile": {},
+      "fitted_effective_weights": {},
+      "recommendation_note": "collect more settled or marked shadow samples before changing live parameters"
+    },
+    {
+      "profile": "music_release",
+      "sample_count": 1,
+      "status": "insufficient_samples",
+      "target_source_counts": {
+        "latest_mark": 1
+      },
+      "event_type_counts": {
+        "content_release": 1
+      },
+      "action_counts": {
+        "release": 1
+      },
+      "avg_p_model": 0.4775,
+      "avg_target_yes_probability": 0.545,
+      "calibration_error": 0.0675,
+      "brier_score": 0.0046,
+      "current_profile": {
+        "base_logit": -0.35,
+        "negated_action_base_logit": null,
+        "evidence_weight": 1.15,
+        "preheat_weight": 0.55,
+        "cadence_weight": 0.25,
+        "partner_weight": 0.2,
+        "time_weight": 1.1,
+        "spread_penalty_weight": 0.5
+      },
+      "suggested_profile": {},
+      "fitted_effective_weights": {},
+      "recommendation_note": "collect more settled or marked shadow samples before changing live parameters"
+    }
+  ]
+}

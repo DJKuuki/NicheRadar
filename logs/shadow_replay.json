@@ -1,0 +1,98 @@
+{
+  "generated_at_utc": "2026-04-27T05:34:37.833746+00:00",
+  "record_count": 2,
+  "records": [
+    {
+      "fill_id": 9,
+      "slug": "new-playboi-carti-album-before-gta-vi-421",
+      "label": "Playboi Carti new album before GTA VI",
+      "market_id": "540818",
+      "event_type": "content_release",
+      "platform": "streaming",
+      "side": "BUY_NO",
+      "status": "settled",
+      "opened_at_utc": "2026-04-27T04:49:37.601775+00:00",
+      "closed_at_utc": "2026-07-31T00:00:00+00:00",
+      "fill_price": 0.46,
+      "current_price": 1.0,
+      "pnl": 0.54,
+      "pnl_pct": 1.173913,
+      "max_entry_price": 0.4725,
+      "net_edge": 0.0175,
+      "close_source": "settlement_file",
+      "settlement_note": "Example only. Replace with the final resolved side after market settlement."
+    },
+    {
+      "fill_id": 10,
+      "slug": "will-openai-not-ipo-by-december-31-2026",
+      "label": "OpenAI no IPO by Dec 31 2026",
+      "market_id": "608368",
+      "event_type": "ipo_event",
+      "platform": "openai",
+      "side": "BUY_NO",
+      "status": "closed",
+      "opened_at_utc": "2026-04-27T04:49:37.601783+00:00",
+      "closed_at_utc": "2026-05-15T00:00:00+00:00",
+      "fill_price": 0.32,
+      "current_price": 0.42,
+      "pnl": 0.1,
+      "pnl_pct": 0.3125,
+      "max_entry_price": 0.4874,
+      "net_edge": 0.1774,
+      "close_source": "settlement_file",
+      "settlement_note": "Example manual close price for replay."
+    }
+  ],
+  "summary_by_event_type": [
+    {
+      "event_type": "content_release",
+      "count": 1,
+      "open_count": 0,
+      "closed_count": 1,
+      "marked_count": 1,
+      "total_pnl": 0.54,
+      "avg_pnl": 0.54,
+      "win_rate": 1.0,
+      "realized_pnl": 0.54,
+      "unrealized_pnl": 0
+    },
+    {
+      "event_type": "ipo_event",
+      "count": 1,
+      "open_count": 0,
+      "closed_count": 1,
+      "marked_count": 1,
+      "total_pnl": 0.1,
+      "avg_pnl": 0.1,
+      "win_rate": 1.0,
+      "realized_pnl": 0.1,
+      "unrealized_pnl": 0
+    }
+  ],
+  "summary_by_status": [
+    {
+      "status": "closed",
+      "count": 1,
+      "open_count": 0,
+      "closed_count": 1,
+      "marked_count": 1,
+      "total_pnl": 0.1,
+      "avg_pnl": 0.1,
+      "win_rate": 1.0,
+      "realized_pnl": 0.1,
+      "unrealized_pnl": 0
+    },
+    {
+      "status": "settled",
+      "count": 1,
+      "open_count": 0,
+      "closed_count": 1,
+      "marked_count": 1,
+      "total_pnl": 0.54,
+      "avg_pnl": 0.54,
+      "win_rate": 1.0,
+      "realized_pnl": 0.54,
+      "unrealized_pnl": 0
+    }
+  ]
+}

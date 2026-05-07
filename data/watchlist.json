@@ -1,0 +1,50 @@
+[
+  {
+    "slug": "will-gpt-6-be-released",
+    "label": "GPT-6 before GTA VI",
+    "preferred_side": "BUY_YES",
+    "entry_band_low": 0.58,
+    "entry_band_high": 0.63,
+    "note": "ACTIVE. Vol=$629K, Liq=$39.7K. YES at 0.655, endDate=2026-07-31. GTA VI confirmed Nov 19 2026, so endDate is July 31 (pre-deadline). Market is pricing 65% chance. Only enter YES if price dips on temporary sentiment shift without fundamental change. Strong catalyst = OpenAI official announcement."
+  },
+  {
+    "slug": "new-playboi-carti-album-before-gta-vi-421",
+    "label": "Playboi Carti new album before GTA VI",
+    "preferred_side": "BUY_NO",
+    "entry_band_low": 0.44,
+    "entry_band_high": 0.50,
+    "note": "ACTIVE. Vol=$732K, Liq=$22K. YES at 0.545, endDate=2026-07-31. Market NOT settled — tracking next album (Baby Boi) not MUSIC. No confirmed release date. Carti's history is extreme delays. BUY_NO when YES spikes above 0.55 on rumor without hard evidence. Best spread/volume ratio of the three GTA-VI markets."
+  },
+  {
+    "slug": "new-rhianna-album-before-gta-vi-926",
+    "label": "Rihanna new album before GTA VI",
+    "preferred_side": "BUY_NO",
+    "entry_band_low": 0.44,
+    "entry_band_high": 0.50,
+    "note": "ACTIVE. Vol=$706K, Liq=$25.5K. YES at 0.525, endDate=2026-07-31. Rihanna confirmed in studio but no release date, pattern of chronic restarts. Market nearly 50/50 — significant uncertainty priced. BUY_NO when YES exceeds 0.52 without concrete rollout evidence (single + promo). Flip to BUY_YES ONLY on official single release announcement."
+  },
+  {
+    "slug": "will-openai-not-ipo-by-december-31-2026",
+    "label": "OpenAI will NOT IPO by Dec 31 2026",
+    "preferred_side": "BUY_YES",
+    "entry_band_low": 0.62,
+    "entry_band_high": 0.68,
+    "note": "ACTIVE. Vol=$304K, Liq=$2.4K (LOW). YES at 0.65, endDate=2026-06-30 (NOTE: endDate is June 30, not Dec 31 — this may be an early resolution checkpoint). Market says YES = OpenAI does NOT IPO. CFO pushing to delay to 2027, company not profitable. BUY_YES aligns with the no-IPO thesis. Caution: very low liquidity ($2.4K) — shadow fill size must be minimal."
+  },
+  {
+    "slug": "will-tesla-release-optimus-by-june-30-2026",
+    "label": "Tesla Optimus release by Jun 30 2026",
+    "preferred_side": "BUY_NO",
+    "entry_band_low": 0.90,
+    "entry_band_high": 0.97,
+    "note": "ACTIVE. Vol=$77K, Liq=$6.7K. YES at 0.045, endDate=2026-06-30. Market already pricing 95.5% NO — almost entirely priced in. Production starts July-Aug 2026 at Fremont, external sales targeted 2027+. Edge near zero at current prices. OBSERVE ONLY — do not open new shadow fills unless YES spikes above 0.15 on incorrect news."
+  },
+  {
+    "slug": "will-apple-release-a-macbook-with-cellular-connectivity-by-june-30",
+    "label": "Apple cellular MacBook by Jun 30 2026",
+    "preferred_side": "BUY_NO",
+    "entry_band_low": 0.90,
+    "entry_band_high": 0.97,
+    "note": "ACTIVE. Vol=$6.7K (VERY LOW), Liq=$1.5K (VERY LOW). YES at 0.07, endDate=2026-06-30. Extremely low liquidity — wide bid/ask spread (0.026 bid vs 0.121 ask). Feature not expected until late 2026 or 2027. Market already near 93% NO. OBSERVE ONLY — liquidity too thin for meaningful shadow fills. Consider removing from active watchlist."
+  }
+]
