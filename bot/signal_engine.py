@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# NOTE: debate_models is imported lazily inside build_debate_signal to avoid
+# circular imports and to keep this module usable without the debate subsystem.
+
 from dataclasses import dataclass
 import math
 
@@ -171,3 +174,81 @@ def _time_score(days_to_expiry: float) -> float:
     if days_to_expiry <= 7:
         return 0.08
     return -0.02
+
+
+# ---------------------------------------------------------------------------
+# AI辩论信号构建（替代启发式logit模型）
+# ---------------------------------------------------------------------------
+
+def build_debate_signal(
+    debate_result,          # DebateResult（懒导入避免循环依赖）
+    parsed: ParsedMarket,
+    config: "BotConfig",
+) -> Signal:
+    """
+    将AI辩论的Research Manager决策（DebateResult）转化为标准Signal对象。
+
+    p_yes_estimate来自AI对市场分析后给出的结算概率估计，
+    用它替代原来硬编码logit模型计算的p_model。
+    其余Edge/风控逻辑保持与build_signal()完全一致。
+    """
+    market = parsed.market
+    p_model = debate_result.p_yes_estimate          # AI估计的YES结算概率
+    p_mid = market.mid_probability                  # 市场当前中间价
+    total_buffer = config.fee_buffer + config.uncertainty_buffer
+
+    yes_edge = p_model - p_mid
+    side = "BUY_YES" if yes_edge >= 0 else "BUY_NO"
+    model_price = p_model if side == "BUY_YES" else 1 - p_model
+    market_price = market.mid_for_side(side)
+    edge = model_price - market_price
+    net_edge = edge - total_buffer
+    max_entry_price = model_price - total_buffer
+
+    reasons = [
+        f"signal_source=debate",
+        f"debate_id={debate_result.debate_id}",
+        f"debate_direction={debate_result.direction}",
+        f"debate_confidence={debate_result.confidence:.2f}",
+        f"ai_p_yes={p_model:.4f}",
+        f"market_p_yes={p_mid:.4f}",
+        f"yes_edge={yes_edge:.4f}",
+        f"rounds_completed={debate_result.rounds_completed}",
+        f"judge_iterations={debate_result.judge_iterations}",
+        # 截断推理文本至160字符，防止reasons字段过长
+        f"reasoning={debate_result.reasoning[:160].replace(chr(10), ' ')}",
+    ]
+
+    return Signal(
+        market_id=market.market_id,
+        side=side,
+        p_model=round(p_model, 4),
+        p_mid=round(p_mid, 4),
+        edge=round(edge, 4),
+        net_edge=round(net_edge, 4),
+        max_entry_price=round(max(0.01, max_entry_price), 4),
+        confidence=debate_result.confidence,
+        reasons=reasons,
+    )
+
+
+def is_debate_signal_tradeable(debate_result, config: "BotConfig") -> tuple[bool, list[str]]:
+    """
+    快速检查AI辩论结果是否值得进入完整风控/shadow流程。
+    在调用build_debate_signal之前使用，过滤掉明显不值得交易的情况。
+
+    返回 (allowed: bool, reasons: list[str])
+    """
+    reasons = []
+
+    if not debate_result.is_valid:
+        return False, ["debate_result_invalid"]
+
+    if debate_result.direction == "SKIP":
+        return False, ["debate_direction=SKIP"]
+
+    if debate_result.confidence < 0.55:
+        reasons.append(f"debate_confidence_too_low={debate_result.confidence:.2f}")
+        return False, reasons
+
+    return True, []

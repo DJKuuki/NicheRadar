@@ -40,7 +40,7 @@ from bot.settlement_validation import (
 )
 from bot.shadow import append_shadow_fills, build_shadow_fills
 from bot.shadow_replay import format_shadow_replay_report, load_settlements, replay_shadow_pnl, write_replay_json
-from bot.signal_engine import build_signal
+from bot.signal_engine import build_signal, build_debate_signal, is_debate_signal_tradeable
 from bot.storage import WatchlistStore
 from bot.watchlist import (
     append_watchlist_alerts,
@@ -138,6 +138,41 @@ def main() -> None:
         "--evidence-sources",
         default="data/evidence_sources.json",
         help="Path to evidence source registry json.",
+    )
+    # ---- AI辩论模式参数 ----
+    parser.add_argument(
+        "--debate-mode",
+        action="store_true",
+        help="开启 AI 辩论模式：用AI分析取代启发式 logit 信号引擎。"
+             "默认为终端交互模式（每个市场分析要手动操作）。",
+    )
+    parser.add_argument(
+        "--debate-rounds",
+        type=int,
+        default=1,
+        help="AI辩论中 Judge 迨代次数（0=无Judge过滤，默认=1）。",
+    )
+    parser.add_argument(
+        "--debate-mode-type",
+        choices=["terminal", "batch"],
+        default="terminal",
+        help="辩论交互模式：terminal=终端手动交互，batch=文件交换模式。",
+    )
+    parser.add_argument(
+        "--debate-inbox",
+        default="logs/ai_inbox",
+        help="批量模式下辩论包写入目录。",
+    )
+    parser.add_argument(
+        "--debate-outbox",
+        default="logs/ai_outbox",
+        help="批量模式下 AI 回复读取目录。",
+    )
+    parser.add_argument(
+        "--debate-min-edge",
+        type=float,
+        default=0.05,
+        help="AI辩论信号要求的最小 Edge（AI估计概率与市场价之差），默认 0.05。",
     )
     args = parser.parse_args()
 
@@ -314,6 +349,22 @@ def _run_watchlist_loop(
     previous_by_slug = load_latest_watchlist_snapshots(args.log_file)
     store = WatchlistStore(args.db_file) if args.db_file else None
 
+    # 初始化 AI 辩论调度器（仅在 --debate-mode 开启时）
+    orchestrator = None
+    if getattr(args, "debate_mode", False):
+        from bot.debate_orchestrator import DebateOrchestrator
+        orchestrator = DebateOrchestrator(
+            judge_iterations=getattr(args, "debate_rounds", 1),
+            mode=getattr(args, "debate_mode_type", "terminal"),
+            inbox_dir=getattr(args, "debate_inbox", "logs/ai_inbox"),
+            outbox_dir=getattr(args, "debate_outbox", "logs/ai_outbox"),
+        )
+        print(
+            f"debate_mode=enabled "
+            f"judge_iterations={orchestrator.judge_iterations} "
+            f"mode={orchestrator.mode}"
+        )
+
     for iteration in range(1, iterations + 1):
         now = utc_now().astimezone(timezone.utc)
         markets = load_live_markets_by_slugs(
@@ -347,6 +398,79 @@ def _run_watchlist_loop(
             evidence = collector.collect(parsed, now)
             signal = build_signal(parsed, evidence, config)
             allowed_signal, signal_reasons = allow_signal(signal, config)
+
+            # ----------------------------------------------------------------
+            # AI辩论模式：对通过初步过滤的候选市场，调用AI辩论生成更可靠的信号
+            # ----------------------------------------------------------------
+            if orchestrator is not None and allowed_market:
+                debate_min_edge = getattr(args, "debate_min_edge", 0.05)
+                # 只对初步logit信号显示有价値的市场运行辩论（net_edge > 0，避免对无机会市场浪费交互）
+                if signal.net_edge > 0:
+                    print(
+                        f"debate_trigger slug={item.slug} "
+                        f"logit_net_edge={signal.net_edge:.4f} "
+                        f"p_mid={signal.p_mid:.4f}"
+                    )
+                    # 构建辩论输入所需的证据文本
+                    evidence_text = _build_evidence_text(evidence, parsed)
+                    debate_result = orchestrator.run_debate(
+                        market_slug=item.slug,
+                        market_title=market.title,
+                        market_description=market.description,
+                        settlement_date=market.closes_at.strftime("%Y-%m-%d"),
+                        days_to_expiry=parsed.days_to_expiry,
+                        current_yes_price=market.mid_probability,
+                        current_no_price=market.no_mid_probability,
+                        spread=market.spread,
+                        event_type=parsed.event_type,
+                        platform=parsed.platform,
+                        evidence_text=evidence_text,
+                        evidence_score=evidence.score,
+                    )
+                    # 将辩论结果落库
+                    if store is not None:
+                        try:
+                            store.insert_debate_result(item.slug, debate_result)
+                        except Exception as e:
+                            print(f"debate_record_insert_error slug={item.slug} err={e}")
+
+                    # 用辩论信号替换logit信号
+                    tradeable, debate_block_reasons = is_debate_signal_tradeable(debate_result, config)
+                    if tradeable:
+                        debate_signal = build_debate_signal(debate_result, parsed, config)
+                        # 追加辩论 edge 过滤
+                        if abs(debate_signal.edge) >= debate_min_edge:
+                            signal = debate_signal
+                            allowed_signal, signal_reasons = allow_signal(signal, config)
+                            print(
+                                f"debate_signal_accepted slug={item.slug} "
+                                f"p_yes={debate_result.p_yes_estimate:.3f} "
+                                f"direction={debate_result.direction} "
+                                f"edge={debate_signal.edge:.4f} "
+                                f"confidence={debate_result.confidence:.2f}"
+                            )
+                        else:
+                            allowed_signal = False
+                            signal_reasons = [
+                                f"debate_edge_too_small={abs(debate_signal.edge):.4f}",
+                                f"min_required={debate_min_edge}",
+                            ]
+                            print(
+                                f"debate_signal_skipped_edge slug={item.slug} "
+                                f"edge={debate_signal.edge:.4f} min={debate_min_edge}"
+                            )
+                    else:
+                        allowed_signal = False
+                        signal_reasons = debate_block_reasons
+                        print(
+                            f"debate_signal_blocked slug={item.slug} "
+                            f"reasons={','.join(debate_block_reasons)}"
+                        )
+                else:
+                    print(
+                        f"debate_skip_no_edge slug={item.slug} "
+                        f"logit_net_edge={signal.net_edge:.4f} — 辩论仅对有初始优势的市场运行"
+                    )
 
             snapshots.append(
                 build_watchlist_snapshot(
@@ -433,6 +557,59 @@ def _run_watchlist_loop(
 
         if iteration < iterations and poll_seconds > 0:
             time.sleep(poll_seconds)
+
+
+
+def _build_evidence_text(evidence, parsed) -> str:
+    """
+    将 Evidence 对象和 ParsedMarket 的关键字段转化为
+    AI辩论Prompt中"可阅读的证据摘要"文本。
+
+    evidence: bot.models.Evidence
+    parsed:   bot.models.ParsedMarket
+    """
+    lines = []
+
+    # 基础信号信息
+    lines.append(f"[Evidence Summary]")
+    lines.append(f"Event Type: {parsed.event_type}")
+    lines.append(f"Subject: {parsed.subject}")
+    lines.append(f"Platform: {parsed.platform}")
+    lines.append(f"Action: {parsed.action}")
+    lines.append(f"Days to Expiry: {parsed.days_to_expiry:.1f}")
+    lines.append(f"Evidence Score (0-1): {evidence.score:.3f}")
+    lines.append(f"Evidence Confidence (0-1): {evidence.confidence:.3f}")
+    lines.append(f"Evidence Mode: {evidence.mode}")
+    lines.append("")
+
+    # 子分数（如果有）
+    if evidence.preheat_score is not None:
+        lines.append(f"Preheat Score (recent buzz): {evidence.preheat_score:.3f}")
+    if evidence.cadence_score is not None:
+        lines.append(f"Cadence Score (news volume): {evidence.cadence_score:.3f}")
+    if evidence.partner_score is not None:
+        lines.append(f"Partner Score (official sources): {evidence.partner_score:.3f}")
+    if evidence.source_reliability is not None:
+        lines.append(f"Source Reliability: {evidence.source_reliability:.3f}")
+
+    # 数量指标
+    if evidence.recent_entries_30d is not None:
+        lines.append(f"Recent News Entries (30d): {evidence.recent_entries_30d}")
+    if evidence.keyword_hits_30d is not None:
+        lines.append(f"Keyword Hits (30d): {evidence.keyword_hits_30d}")
+    if evidence.latest_entry_age_days is not None:
+        lines.append(f"Latest Entry Age (days): {evidence.latest_entry_age_days:.1f}")
+    if evidence.source_url:
+        lines.append(f"Primary Source URL: {evidence.source_url}")
+    if evidence.source_type:
+        lines.append(f"Source Type: {evidence.source_type}")
+
+    lines.append("")
+    lines.append("[Evidence Reasons / Raw Signals]")
+    for reason in (evidence.reasons or []):
+        lines.append(f"  - {reason}")
+
+    return "\n".join(lines)
 
 
 def _build_config(args: argparse.Namespace, max_days_to_expiry: float | None = None) -> BotConfig:

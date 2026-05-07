@@ -157,6 +157,70 @@ class WatchlistStore:
             connection.commit()
         return inserted
 
+    def insert_debate_result(self, slug: str, debate_result) -> None:
+        """
+        将一次完整辩论结果持久化到 debate_records 表。
+        debate_result: DebateResult 实例（懒导入以避免循环依赖）
+        """
+        import json as _json
+        from datetime import datetime as _dt
+        payload = {
+            "debate_id": debate_result.debate_id,
+            "market_slug": debate_result.market_slug,
+            "p_yes_estimate": debate_result.p_yes_estimate,
+            "direction": debate_result.direction,
+            "confidence": debate_result.confidence,
+            "reasoning": debate_result.reasoning,
+            "bull_history": debate_result.bull_history,
+            "bear_history": debate_result.bear_history,
+            "judge_history": debate_result.judge_history,
+            "rounds_completed": debate_result.rounds_completed,
+            "judge_iterations": debate_result.judge_iterations,
+            "is_valid": debate_result.is_valid,
+            "created_at": debate_result.created_at,
+        }
+        with closing(self._connect()) as connection:
+            connection.execute(
+                """
+                INSERT INTO debate_records (
+                    debate_id, timestamp_utc, slug, p_yes_estimate, direction,
+                    confidence, rounds_completed, judge_iterations,
+                    is_valid, reasoning_summary, raw_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    debate_result.debate_id,
+                    debate_result.created_at,
+                    slug,
+                    debate_result.p_yes_estimate,
+                    debate_result.direction,
+                    debate_result.confidence,
+                    debate_result.rounds_completed,
+                    debate_result.judge_iterations,
+                    int(debate_result.is_valid),
+                    debate_result.reasoning[:500] if debate_result.reasoning else "",
+                    _json.dumps(payload, ensure_ascii=True),
+                ),
+            )
+            connection.commit()
+
+    def query_debate_results(self, slug: str | None = None, limit: int = 50) -> list[dict]:
+        """查询辩论记录，可按slug过滤，按时间倒序。"""
+        import json as _json
+        with closing(self._connect()) as connection:
+            if slug:
+                rows = connection.execute(
+                    "SELECT raw_json FROM debate_records WHERE slug = ? ORDER BY timestamp_utc DESC LIMIT ?",
+                    (slug, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT raw_json FROM debate_records ORDER BY timestamp_utc DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [_json.loads(row[0]) for row in rows]
+
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
 
@@ -271,6 +335,24 @@ class WatchlistStore:
 
                 CREATE INDEX IF NOT EXISTS idx_shadow_marks_fill_time
                 ON shadow_marks(fill_id, timestamp_utc);
+
+                CREATE TABLE IF NOT EXISTS debate_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    debate_id TEXT NOT NULL UNIQUE,
+                    timestamp_utc TEXT NOT NULL,
+                    slug TEXT NOT NULL,
+                    p_yes_estimate REAL,
+                    direction TEXT,
+                    confidence REAL,
+                    rounds_completed INTEGER,
+                    judge_iterations INTEGER,
+                    is_valid INTEGER,
+                    reasoning_summary TEXT,
+                    raw_json TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_debate_records_slug_time
+                ON debate_records(slug, timestamp_utc);
                 """
             )
             self._ensure_columns(
