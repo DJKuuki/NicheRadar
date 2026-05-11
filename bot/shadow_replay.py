@@ -6,7 +6,8 @@ import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+
+from .common import as_float as _float_or_none
 
 
 @dataclass(frozen=True)
@@ -293,7 +294,3 @@ def _json_dict(raw: object) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _float_or_none(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None

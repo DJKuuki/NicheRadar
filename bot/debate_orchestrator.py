@@ -9,22 +9,19 @@ bot/debate_orchestrator.py
   3. 用户将AI的回复粘贴回终端的waiting input
   4. 程序解析结构化回复，继续下一步
 
-批量模式（--debate-batch）：
-  - 一次性将所有待分析市场的所有Prompt写出到ai_inbox目录
-  - 用户批量处理后，将所有结果写入ai_outbox目录
-  - 程序从ai_outbox读取并继续执行
+文件交换模式（--debate-mode-type batch）：
+  - 每个辩论步骤将 Prompt 写出到 ai_inbox/session_id 目录
+  - 用户处理后，将对应结果写入 ai_outbox/session_id 目录
+  - 程序读取结果并继续下一步；后续 Prompt 会携带上一轮结果
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
-import sys
 import uuid
-from datetime import datetime
+from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from bot.debate_models import (
     DebatePacket,
@@ -35,6 +32,11 @@ from bot.debate_models import (
     parse_direction,
 )
 from bot.debate_prompts import build_full_debate_prompt
+from bot.llm_file_exchange import (
+    LlmFileExchange,
+    read_pasted_response,
+    strip_markdown_code_blocks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +45,19 @@ logger = logging.getLogger(__name__)
 # 解析函数：从AI自由文本中提取结构化数据
 # ===========================================================================
 
+def _strip_markdown_code_blocks(text: str) -> str:
+    """Backwards-compatible alias for :func:`bot.llm_file_exchange.strip_markdown_code_blocks`.
+
+    Kept as a module-level name because the test suite (and any external
+    callers) imports it directly from this module.
+    """
+    return strip_markdown_code_blocks(text)
+
+
 def _parse_researcher_round(response: str, debate_id: str) -> DebateRoundResult:
     """从AI回复中解析Bull和Bear的论点"""
+    raw_response = response
+    response = _strip_markdown_code_blocks(response)
     bull_argument = ""
     bear_argument = ""
 
@@ -76,12 +89,14 @@ def _parse_researcher_round(response: str, debate_id: str) -> DebateRoundResult:
         debate_id=debate_id,
         bull_argument=bull_argument,
         bear_argument=bear_argument,
-        raw_response=response,
+        raw_response=raw_response,
     )
 
 
 def _parse_judge_critique(response: str, debate_id: str) -> JudgeCritique:
     """从AI回复中解析裁判的XML格式指令"""
+    raw_response = response
+    response = _strip_markdown_code_blocks(response)
     bull_directive = ""
     bear_directive = ""
 
@@ -103,12 +118,14 @@ def _parse_judge_critique(response: str, debate_id: str) -> JudgeCritique:
         debate_id=debate_id,
         bull_directive=bull_directive,
         bear_directive=bear_directive,
-        raw_response=response,
+        raw_response=raw_response,
     )
 
 
 def _parse_research_manager(response: str, debate_id: str) -> ResearchManagerDecision:
     """从AI回复中解析Research Manager的结构化决策"""
+    raw_response = response
+    response = _strip_markdown_code_blocks(response)
     # 优先从RESEARCH_SIGNAL块提取
     p_yes = None
     direction = "SKIP"
@@ -140,6 +157,18 @@ def _parse_research_manager(response: str, debate_id: str) -> ResearchManagerDec
             except ValueError:
                 pass
 
+    if direction == "SKIP":
+        direction_match = re.search(r"Direction\s*:\s*([^\n]+)", response, re.IGNORECASE)
+        if direction_match:
+            direction = parse_direction(direction_match.group(1).strip())
+
+    confidence_match = re.search(r"Confidence\s*:\s*([0-9.]+)", response, re.IGNORECASE)
+    if confidence_match:
+        try:
+            confidence = float(confidence_match.group(1))
+        except ValueError:
+            pass
+
     if p_yes is None:
         p_yes = 0.5
         logger.warning("debate_id=%s research_manager: p_yes not found, defaulting to 0.5", debate_id)
@@ -163,7 +192,7 @@ def _parse_research_manager(response: str, debate_id: str) -> ResearchManagerDec
         reasoning=reasoning,
         key_bull_points=key_bull_match.group(1).strip() if key_bull_match else "",
         key_bear_points=key_bear_match.group(1).strip() if key_bear_match else "",
-        raw_response=response,
+        raw_response=raw_response,
     )
 
 
@@ -174,11 +203,11 @@ def _parse_research_manager(response: str, debate_id: str) -> ResearchManagerDec
 def _prompt_ai_via_terminal(prompt_text: str, debate_id: str, task: str) -> str:
     """
     终端IO模式：将Prompt打印到终端，等待用户粘贴AI回复。
-    
+
     用户操作：
       1. 复制终端输出的Prompt内容
       2. 发给AI（Claude/Gemini/GPT等）
-      3. 将AI回复粘贴到此处的input提示后，按Ctrl+D（Unix）或输入EOF标记结束
+      3. 将AI回复粘贴到此处的input提示后，按Ctrl+D（Unix）或输入END_OF_AI_RESPONSE结束
     """
     print("\n" + "█" * 70)
     print(f"  AI辩论请求 | debate_id={debate_id} | task={task}")
@@ -189,17 +218,7 @@ def _prompt_ai_via_terminal(prompt_text: str, debate_id: str, task: str) -> str:
     print("请将AI的完整回复粘贴到下方（Windows: 粘贴后按 Enter 再输入 END_OF_AI_RESPONSE，Linux/Mac: 按 Ctrl+D 结束）：")
     print("─" * 70 + "\n")
 
-    lines = []
-    try:
-        while True:
-            line = input()
-            if line.strip() == "END_OF_AI_RESPONSE":
-                break
-            lines.append(line)
-    except EOFError:
-        pass
-
-    response = "\n".join(lines).strip()
+    response = read_pasted_response()
     if not response:
         logger.warning("debate_id=%s task=%s: empty response received from terminal", debate_id, task)
     return response
@@ -209,36 +228,15 @@ def _prompt_ai_via_terminal(prompt_text: str, debate_id: str, task: str) -> str:
 # 文件IO：批量模式
 # ===========================================================================
 
-def _write_inbox_packet(inbox_dir: str, packet: DebatePacket, prompt_text: str) -> None:
-    """将辩论包和Prompt写入ai_inbox目录"""
-    path = Path(inbox_dir)
-    path.mkdir(parents=True, exist_ok=True)
-
-    packet_file = path / f"{packet.debate_id}_{packet.task}.json"
-    prompt_file = path / f"{packet.debate_id}_{packet.task}.txt"
-
-    with open(packet_file, "w", encoding="utf-8") as f:
-        # 简单序列化packet（不含复杂类型）
-        json.dump(
-            {k: v for k, v in vars(packet).items()},
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    with open(prompt_file, "w", encoding="utf-8") as f:
-        f.write(prompt_text)
-
-    logger.info("debate_inbox_written debate_id=%s task=%s path=%s", packet.debate_id, packet.task, prompt_file)
+def _packet_to_sidecar(packet: DebatePacket) -> dict[str, object]:
+    """Serialise a DebatePacket for the JSON sidecar in the inbox."""
+    if is_dataclass(packet):
+        return asdict(packet)
+    return {k: v for k, v in vars(packet).items()}
 
 
-def _read_outbox_result(outbox_dir: str, debate_id: str, task: str) -> Optional[str]:
-    """从ai_outbox目录读取AI回复"""
-    path = Path(outbox_dir) / f"{debate_id}_{task}_result.txt"
-    if not path.exists():
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read().strip()
+def _request_id(packet: DebatePacket) -> str:
+    return f"{packet.debate_id}_{packet.task}"
 
 
 # ===========================================================================
@@ -251,7 +249,7 @@ class DebateOrchestrator:
     
     模式：
       - terminal（默认）：每轮交互在终端完成
-      - batch：一次性写入ai_inbox，从ai_outbox读取结果
+      - batch：通过ai_inbox/ai_outbox文件交换完成每轮交互
     """
 
     def __init__(
@@ -263,8 +261,24 @@ class DebateOrchestrator:
     ):
         self.judge_iterations = judge_iterations
         self.mode = mode
-        self.inbox_dir = inbox_dir
-        self.outbox_dir = outbox_dir
+        # 每次启动生成唯一 session_id，batch 模式下隔离并发实例的文件
+        self.session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:4]
+        self._exchange: LlmFileExchange | None = None
+        if mode == "batch":
+            self._exchange = LlmFileExchange(
+                inbox_dir,
+                outbox_dir,
+                prompt_suffix=".txt",
+                result_suffix="_result.txt",
+                sidecar_suffix=".json",
+                session_id=self.session_id,
+            )
+            self.inbox_dir = str(self._exchange.inbox_dir)
+            self.outbox_dir = str(self._exchange.outbox_dir)
+        else:
+            self.inbox_dir = inbox_dir
+            self.outbox_dir = outbox_dir
+        logger.info("debate_orchestrator_init mode=%s session_id=%s", mode, self.session_id)
 
     def _get_ai_response(self, packet: DebatePacket) -> str:
         """根据模式获取AI回复"""
@@ -273,27 +287,27 @@ class DebateOrchestrator:
         if self.mode == "terminal":
             return _prompt_ai_via_terminal(prompt_text, packet.debate_id, packet.task)
 
-        elif self.mode == "batch":
-            # 写入inbox，尝试从outbox读取（批量模式下由外部流程处理）
-            _write_inbox_packet(self.inbox_dir, packet, prompt_text)
-            result = _read_outbox_result(self.outbox_dir, packet.debate_id, packet.task)
-            if result:
-                return result
-            # 如果outbox还没有结果，进入等待循环
-            print(f"\n[批量模式] 已写入 {self.inbox_dir}/{packet.debate_id}_{packet.task}.txt")
-            print(f"请处理后将结果写入: {self.outbox_dir}/{packet.debate_id}_{packet.task}_result.txt")
-            print("按 Enter 重试读取，或输入 SKIP 跳过此市场...")
-            while True:
-                cmd = input("> ").strip().upper()
-                if cmd == "SKIP":
-                    return ""
-                result = _read_outbox_result(self.outbox_dir, packet.debate_id, packet.task)
-                if result:
-                    return result
-                print("仍未找到结果文件，再次重试...")
+        if self.mode == "batch":
+            assert self._exchange is not None  # set in __init__ for batch mode
+            request_id = _request_id(packet)
+            self._exchange.write_prompt(
+                request_id,
+                prompt_text,
+                sidecar=_packet_to_sidecar(packet),
+            )
 
-        else:
-            raise ValueError(f"Unknown mode: {self.mode}")
+            def _on_missing(inbox: Path, outbox: Path) -> None:
+                print(f"\n[文件交换模式] 已写入 {inbox}")
+                print(f"请处理后将结果写入: {outbox}")
+                print("按 Enter 重试读取，或输入 SKIP 跳过此市场...")
+
+            result = self._exchange.wait_for_result(
+                request_id,
+                on_missing=_on_missing,
+            )
+            return result or ""
+
+        raise ValueError(f"Unknown mode: {self.mode}")
 
     def run_debate(
         self,
@@ -318,7 +332,7 @@ class DebateOrchestrator:
           [可选 Judge轮 × N]
           Final: Research Manager决策
         """
-        debate_id = f"{market_slug}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        debate_id = f"{market_slug}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
         result = DebateResult(
             debate_id=debate_id,
@@ -363,7 +377,7 @@ class DebateOrchestrator:
             judge_critique_bear=judge_critique_bear,
             debate_round=1,
             judge_count=judge_count,
-            task="researcher_round",
+            task="researcher_round_1",
         )
 
         raw_response = self._get_ai_response(packet)
@@ -396,7 +410,7 @@ class DebateOrchestrator:
                 judge_critique_bear=judge_critique_bear,
                 debate_round=judge_count + 1,
                 judge_count=judge_count,
-                task="judge_critique",
+                task=f"judge_critique_{judge_count + 1}",
             )
 
             judge_raw = self._get_ai_response(judge_packet)
@@ -425,7 +439,7 @@ class DebateOrchestrator:
                 judge_critique_bear=judge_critique_bear,
                 debate_round=judge_count + 1,
                 judge_count=judge_count,
-                task="researcher_round",
+                task=f"researcher_round_{judge_count + 1}",
             )
 
             followup_raw = self._get_ai_response(followup_packet)
@@ -482,8 +496,11 @@ class DebateOrchestrator:
 
     def run_batch_debates(self, debate_inputs: list[dict]) -> list[DebateResult]:
         """
-        批量运行多个市场的辩论（批量模式）。
-        先写入所有inbox，再等待用户处理，最后读取所有outbox。
+        批量运行多个市场的辩论。
+
+        注意：多轮辩论的后续Prompt依赖上一轮AI回复，因此每个市场仍按
+        researcher -> judge -> followup -> manager 的顺序推进。batch模式只负责
+        用文件交换替代终端粘贴，不承诺预先生成所有后续Prompt。
         """
         results = []
         for inp in debate_inputs:

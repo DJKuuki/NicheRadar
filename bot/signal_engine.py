@@ -198,7 +198,10 @@ def build_debate_signal(
     total_buffer = config.fee_buffer + config.uncertainty_buffer
 
     yes_edge = p_model - p_mid
-    side = "BUY_YES" if yes_edge >= 0 else "BUY_NO"
+    if debate_result.direction in {"BUY_YES", "BUY_NO"}:
+        side = debate_result.direction
+    else:
+        side = "BUY_YES" if yes_edge >= 0 else "BUY_NO"
     model_price = p_model if side == "BUY_YES" else 1 - p_model
     market_price = market.mid_for_side(side)
     edge = model_price - market_price

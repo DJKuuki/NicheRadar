@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 import unittest
 
 from bot.config import BotConfig
+from bot.debate_models import DebateResult
 from bot.models import Evidence, Market, ParsedMarket
-from bot.signal_engine import build_signal
+from bot.signal_engine import build_debate_signal, build_signal
 
 
 class SignalEngineTests(unittest.TestCase):
@@ -165,6 +166,32 @@ class SignalEngineTests(unittest.TestCase):
 
         self.assertIn("model_profile=ipo_event", signal.reasons)
         self.assertEqual(signal.side, "BUY_NO")
+
+    def test_debate_signal_respects_research_manager_direction(self) -> None:
+        market = self._market("Will Example be released?", yes_bid=0.70, yes_ask=0.72)
+        parsed = ParsedMarket(
+            market=market,
+            event_type="content_release",
+            subject="Example",
+            platform="openai",
+            action="release",
+            days_to_expiry=5,
+        )
+        debate_result = DebateResult(
+            debate_id="debate-1",
+            market_slug="example",
+            p_yes_estimate=0.80,
+            direction="BUY_NO",
+            confidence=0.75,
+            reasoning="Research manager prefers NO despite a high YES estimate.",
+            is_valid=True,
+        )
+
+        signal = build_debate_signal(debate_result, parsed, BotConfig())
+
+        self.assertEqual(signal.side, "BUY_NO")
+        self.assertLess(signal.edge, 0)
+        self.assertIn("debate_direction=BUY_NO", signal.reasons)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@
     "label": "Playboi Carti new album before GTA VI",
     "preferred_side": "BUY_NO",
     "entry_band_low": 0.44,
-    "entry_band_high": 0.50,
+    "entry_band_high": 0.5,
     "note": "ACTIVE. Vol=$732K, Liq=$22K. YES at 0.545, endDate=2026-07-31. Market NOT settled — tracking next album (Baby Boi) not MUSIC. No confirmed release date. Carti's history is extreme delays. BUY_NO when YES spikes above 0.55 on rumor without hard evidence. Best spread/volume ratio of the three GTA-VI markets."
   },
   {
@@ -20,7 +20,7 @@
     "label": "Rihanna new album before GTA VI",
     "preferred_side": "BUY_NO",
     "entry_band_low": 0.44,
-    "entry_band_high": 0.50,
+    "entry_band_high": 0.5,
     "note": "ACTIVE. Vol=$706K, Liq=$25.5K. YES at 0.525, endDate=2026-07-31. Rihanna confirmed in studio but no release date, pattern of chronic restarts. Market nearly 50/50 — significant uncertainty priced. BUY_NO when YES exceeds 0.52 without concrete rollout evidence (single + promo). Flip to BUY_YES ONLY on official single release announcement."
   },
   {
@@ -35,7 +35,7 @@
     "slug": "will-tesla-release-optimus-by-june-30-2026",
     "label": "Tesla Optimus release by Jun 30 2026",
     "preferred_side": "BUY_NO",
-    "entry_band_low": 0.90,
+    "entry_band_low": 0.9,
     "entry_band_high": 0.97,
     "note": "ACTIVE. Vol=$77K, Liq=$6.7K. YES at 0.045, endDate=2026-06-30. Market already pricing 95.5% NO — almost entirely priced in. Production starts July-Aug 2026 at Fremont, external sales targeted 2027+. Edge near zero at current prices. OBSERVE ONLY — do not open new shadow fills unless YES spikes above 0.15 on incorrect news."
   },
@@ -43,8 +43,16 @@
     "slug": "will-apple-release-a-macbook-with-cellular-connectivity-by-june-30",
     "label": "Apple cellular MacBook by Jun 30 2026",
     "preferred_side": "BUY_NO",
-    "entry_band_low": 0.90,
+    "entry_band_low": 0.9,
     "entry_band_high": 0.97,
     "note": "ACTIVE. Vol=$6.7K (VERY LOW), Liq=$1.5K (VERY LOW). YES at 0.07, endDate=2026-06-30. Extremely low liquidity — wide bid/ask spread (0.026 bid vs 0.121 ask). Feature not expected until late 2026 or 2027. Market already near 93% NO. OBSERVE ONLY — liquidity too thin for meaningful shadow fills. Consider removing from active watchlist."
+  },
+  {
+    "slug": "trump-out-as-president-before-gta-vi-846",
+    "label": "Trump out as President before GTA VI?",
+    "preferred_side": "BUY_YES",
+    "entry_band_low": 0.3,
+    "entry_band_high": 0.7,
+    "note": "AUTO_DISCOVERED. Vol=$635.4K. Cat=None. Generated on 2026-05-08."
   }
 ]

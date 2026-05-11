@@ -6,6 +6,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from .common import as_float as _float_or_none, as_int as _int_or_none
+
 
 class WatchlistStore:
     def __init__(self, path: str) -> None:
@@ -163,7 +165,6 @@ class WatchlistStore:
         debate_result: DebateResult 实例（懒导入以避免循环依赖）
         """
         import json as _json
-        from datetime import datetime as _dt
         payload = {
             "debate_id": debate_result.debate_id,
             "market_slug": debate_result.market_slug,
@@ -470,18 +471,6 @@ def _shadow_fill_row(fill: dict[str, object]) -> tuple[Any, ...]:
 def _bool_int(value: object) -> int | None:
     if isinstance(value, bool):
         return int(value)
-    return None
-
-
-def _int_or_none(value: object) -> int | None:
-    if isinstance(value, int):
-        return value
-    return None
-
-
-def _float_or_none(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
     return None
 
 

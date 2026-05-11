@@ -216,6 +216,14 @@ class TestParseResearchManager:
         response = "P_YES: 0.67\n\nDirection: BUY_YES\n\nThis is a strong case."
         result = _parse_research_manager(response, "test-004")
         assert abs(result.p_yes_estimate - 0.67) < 0.001
+        assert result.direction == "BUY_YES"
+
+    def test_raw_response_preserved_when_stripping_code_block(self):
+        """raw_response保留原始审计文本，解析文本可剥离代码块"""
+        response = "```\nRESEARCH_SIGNAL:\nP_YES: 0.41\nDirection: BUY_NO\nConfidence: 0.71\n```\n"
+        result = _parse_research_manager(response, "test-raw")
+        assert result.raw_response == response
+        assert result.direction == "BUY_NO"
 
     def test_p_yes_clamped_to_valid_range(self):
         """p_yes边界值钳制"""

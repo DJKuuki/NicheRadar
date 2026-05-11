@@ -268,7 +268,7 @@ def build_full_debate_prompt(packet: DebatePacket) -> str:
     """
     task = packet.task
 
-    if task == "researcher_round":
+    if task.startswith("researcher_round"):
         bull = build_bull_prompt(packet)
         bear = build_bear_prompt(packet)
         return (
@@ -291,7 +291,7 @@ def build_full_debate_prompt(packet: DebatePacket) -> str:
             "=" * 70
         )
 
-    elif task == "judge_critique":
+    elif task.startswith("judge_critique"):
         judge = build_judge_prompt(packet)
         return (
             "=" * 70 + "\n"

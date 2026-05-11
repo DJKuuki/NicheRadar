@@ -8,8 +8,14 @@ import math
 import sqlite3
 from contextlib import closing
 from pathlib import Path
-from typing import Any
 
+from bot.common import (
+    as_dict as _dict,
+    as_float as _float,
+    as_list as _list,
+    as_str_list as _string_list,
+    fmt_number as _fmt,
+)
 from bot.shadow_replay import Settlement
 from bot.signal_engine import MODEL_PROFILES
 
@@ -475,12 +481,6 @@ def _reason_float(reasons: list[str], key: str) -> float | None:
         return None
 
 
-def _string_list(value: object) -> list[str]:
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    return []
-
-
 def _json_dict(raw: object) -> dict[str, object]:
     if not isinstance(raw, str) or not raw:
         return {}
@@ -493,12 +493,6 @@ def _json_dict(raw: object) -> dict[str, object]:
 
 def _avg(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 4) if values else None
-
-
-def _float(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
 
 
 def _coalesce_float(*values: float | None) -> float | None:
@@ -521,14 +515,3 @@ def _bounded(value: float, low: float, high: float) -> float:
     return min(high, max(low, value))
 
 
-def _dict(value: object) -> dict[str, object]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: object) -> list[dict[str, object]]:
-    return [row for row in value] if isinstance(value, list) else []
-
-
-def _fmt(value: object) -> str:
-    number = _float(value)
-    return "none" if number is None else f"{number:.4f}"

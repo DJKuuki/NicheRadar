@@ -11,6 +11,13 @@ from typing import Any
 
 from bot.backtest_dataset import load_backtest_samples
 from bot.backtest_reporting import build_backtest_report
+from bot.common import (
+    as_dict as _dict,
+    as_float as _float,
+    as_list as _list,
+    fmt_number as _fmt,
+    fmt_percent as _fmt_pct,
+)
 from bot.config import BotConfig
 from bot.portfolio_risk import load_portfolio_risk_state, state_to_dict
 from bot.shadow_replay import Settlement, replay_shadow_pnl
@@ -832,26 +839,4 @@ def _max_value(values: Any) -> object:
     return max(items) if items else None
 
 
-def _float(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
-
-
-def _dict(value: object) -> dict[str, object]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: object) -> list[dict[str, object]]:
-    return [row for row in value] if isinstance(value, list) else []
-
-
-def _fmt(value: object) -> str:
-    number = _float(value)
-    return "none" if number is None else f"{number:.4f}"
-
-
-def _fmt_pct(value: object) -> str:
-    number = _float(value)
-    return "none" if number is None else f"{number:.2%}"
 

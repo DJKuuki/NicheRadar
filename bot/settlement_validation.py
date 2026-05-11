@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from bot.common import as_list_of_dicts as _list, fmt_percent as _fmt_pct
 from bot.shadow_replay import Settlement
 
 
@@ -162,11 +163,3 @@ def _format_issue(level: str, issue: dict[str, object]) -> str:
     )
 
 
-def _list(value: object) -> list[dict[str, object]]:
-    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
-
-
-def _fmt_pct(value: object) -> str:
-    if not isinstance(value, (int, float)):
-        return "none"
-    return f"{float(value):.2%}"

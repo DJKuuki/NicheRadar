@@ -32,7 +32,7 @@ from typing import Any
 
 from bot.config import BotConfig
 from bot.historical_storage import HistoricalStore
-from bot.market_parser import parse_market, utc_now
+from bot.market_parser import parse_market
 from bot.models import Evidence, Market
 from bot.risk_engine import allow_market, allow_signal
 from bot.signal_engine import build_signal

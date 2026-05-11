@@ -32,6 +32,8 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from bot.common import as_float_or as _float
+
 GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 CLOB_BASE_URL = "https://clob.polymarket.com"
 
@@ -365,13 +367,6 @@ def _parse_json_list(value: object) -> list[str]:
     return [str(item) for item in parsed] if isinstance(parsed, list) else []
 
 
-def _float(value: object) -> float:
-    if value is None or value == "":
-        return 0.0
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _parse_iso(raw: str) -> datetime | None:

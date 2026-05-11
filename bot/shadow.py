@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from bot.common import as_float as _float_value
 from bot.config import BotConfig
 
 
@@ -61,12 +62,6 @@ def _side_ask(snapshot: dict[str, object], side: str) -> float | None:
         return _float_value(snapshot.get("yes_ask"))
     if side == "BUY_NO":
         return _float_value(snapshot.get("no_ask"))
-    return None
-
-
-def _float_value(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
     return None
 
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from bot.common import as_float_lax as _float_value
 from bot.models import Evidence, Market, ParsedMarket, Signal
 
 
@@ -284,12 +285,3 @@ def _bool_value(value: object) -> bool | None:
     return None
 
 
-def _float_value(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None

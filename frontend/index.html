@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NicheRadar · Polymarket Shadow Dashboard</title>
+<link rel="stylesheet" href="./styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">NR</div>
+      <div>
+        <div class="brand-name">NicheRadar</div>
+        <div class="brand-sub">Polymarket Shadow Trading Dashboard</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="status-pill" id="dataStatus">
+        <span class="dot"></span>
+        <span id="dataStatusText">Loading…</span>
+      </div>
+      <button class="btn" id="reloadBtn" title="Reload report">↻ Reload</button>
+      <label class="toggle" title="Auto-refresh every 30s">
+        <input type="checkbox" id="autoRefresh">
+        <span>Auto</span>
+      </label>
+      <select id="reportSource" class="select" title="Report data source">
+        <option value="../logs/dashboard_report.json" selected>logs/dashboard_report.json</option>
+        <option value="./dashboard_report.json">frontend/dashboard_report.json</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- ============ KPI CARDS ============ -->
+  <section class="kpis" id="kpis"></section>
+
+  <!-- ============ TAB NAV ============ -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="markets">Markets</button>
+    <button class="tab" data-tab="shadow">Shadow Positions</button>
+    <button class="tab" data-tab="backtest">Backtest</button>
+    <button class="tab" data-tab="risk">Portfolio Risk</button>
+    <button class="tab" data-tab="alerts">Alerts</button>
+    <button class="tab" data-tab="raw">Raw JSON</button>
+  </nav>
+
+  <!-- ============ OVERVIEW TAB ============ -->
+  <section class="tab-panel active" data-panel="overview">
+    <div class="grid two">
+      <div class="card">
+        <header class="card-head">
+          <h2>Edge by Event Type</h2>
+          <span class="hint">Average net edge across snapshots</span>
+        </header>
+        <div class="chart-wrap"><canvas id="edgeChart"></canvas></div>
+      </div>
+      <div class="card">
+        <header class="card-head">
+          <h2>Snapshot Coverage</h2>
+          <span class="hint">Signal-OK vs Market-OK by event type</span>
+        </header>
+        <div class="chart-wrap"><canvas id="coverageChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <header class="card-head">
+        <h2>Top Edges</h2>
+        <span class="hint">Markets ranked by net edge</span>
+      </header>
+      <div class="table-wrap">
+        <table id="topEdgesTable" class="data-table">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Type</th>
+              <th>Platform</th>
+              <th>Side</th>
+              <th class="num">p_model</th>
+              <th class="num">Price</th>
+              <th class="num">Net Edge</th>
+              <th class="num">Evidence</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MARKETS TAB ============ -->
+  <section class="tab-panel" data-panel="markets">
+    <div class="card">
+      <header class="card-head">
+        <h2>Latest Markets</h2>
+        <div class="filter-row">
+          <input id="marketSearch" class="input" placeholder="Search slug / label…">
+          <select id="marketTypeFilter" class="select">
+            <option value="">All event types</option>
+          </select>
+          <select id="marketStatusFilter" class="select">
+            <option value="">Any status</option>
+            <option value="signal_ok">Signal OK</option>
+            <option value="market_ok">Market OK</option>
+            <option value="both">Both OK</option>
+          </select>
+        </div>
+      </header>
+      <div class="table-wrap">
+        <table id="marketsTable" class="data-table">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Type</th>
+              <th>Platform</th>
+              <th>Preferred Side</th>
+              <th>Model Side</th>
+              <th class="num">Price</th>
+              <th class="num">p_model</th>
+              <th class="num">Net Edge</th>
+              <th class="num">Evidence</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SHADOW TAB ============ -->
+  <section class="tab-panel" data-panel="shadow">
+    <div class="grid two">
+      <div class="card">
+        <header class="card-head">
+          <h2>Shadow PnL by Event Type</h2>
+        </header>
+        <div class="chart-wrap"><canvas id="shadowPnlChart"></canvas></div>
+      </div>
+      <div class="card">
+        <header class="card-head">
+          <h2>Shadow Summary</h2>
+        </header>
+        <div class="table-wrap">
+          <table id="shadowSummaryTable" class="data-table">
+            <thead>
+              <tr>
+                <th>Event Type</th>
+                <th class="num">Fills</th>
+                <th class="num">Open</th>
+                <th class="num">Closed</th>
+                <th class="num">Win %</th>
+                <th class="num">Total PnL</th>
+                <th class="num">Realized</th>
+                <th class="num">Unrealized</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <header class="card-head">
+        <h2>Shadow Positions</h2>
+        <span class="hint">All simulated entries with mark-to-market PnL</span>
+      </header>
+      <div class="table-wrap">
+        <table id="shadowPositionsTable" class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Market</th>
+              <th>Type</th>
+              <th>Side</th>
+              <th>Status</th>
+              <th class="num">Fill</th>
+              <th class="num">Mark</th>
+              <th class="num">PnL</th>
+              <th class="num">PnL %</th>
+              <th class="num">Net Edge</th>
+              <th>Opened</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BACKTEST TAB ============ -->
+  <section class="tab-panel" data-panel="backtest">
+    <div class="kpis-sub" id="backtestKpis"></div>
+
+    <div class="grid two">
+      <div class="card">
+        <header class="card-head">
+          <h2>Calibration by Model Profile</h2>
+          <span class="hint">avg p_model vs observed YES rate</span>
+        </header>
+        <div class="chart-wrap"><canvas id="calibrationChart"></canvas></div>
+      </div>
+      <div class="card">
+        <header class="card-head">
+          <h2>Profile PnL</h2>
+          <span class="hint">Total simulated PnL per profile</span>
+        </header>
+        <div class="chart-wrap"><canvas id="profilePnlChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid two">
+      <div class="card">
+        <header class="card-head">
+          <h2>Calibration Detail</h2>
+        </header>
+        <div class="table-wrap">
+          <table id="calibrationTable" class="data-table">
+            <thead>
+              <tr>
+                <th>Profile</th>
+                <th class="num">Count</th>
+                <th class="num">Settled</th>
+                <th class="num">Avg p_model</th>
+                <th class="num">Observed YES</th>
+                <th class="num">Error</th>
+                <th class="num">Brier</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <header class="card-head">
+          <h2>Profile PnL Detail</h2>
+        </header>
+        <div class="table-wrap">
+          <table id="profilePnlTable" class="data-table">
+            <thead>
+              <tr>
+                <th>Profile</th>
+                <th class="num">Fills</th>
+                <th class="num">Total</th>
+                <th class="num">Avg</th>
+                <th class="num">Win %</th>
+                <th class="num">Drawdown</th>
+                <th class="num">Avg Entry</th>
+                <th class="num">Avg Exit</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RISK TAB ============ -->
+  <section class="tab-panel" data-panel="risk">
+    <div class="kpis-sub" id="riskKpis"></div>
+
+    <div class="grid two">
+      <div class="card">
+        <header class="card-head"><h2>Exposure by Event Type</h2></header>
+        <div class="chart-wrap"><canvas id="exposureTypeChart"></canvas></div>
+      </div>
+      <div class="card">
+        <header class="card-head"><h2>Exposure by Market</h2></header>
+        <div class="chart-wrap"><canvas id="exposureMarketChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card" id="circuitBreakerCard">
+      <header class="card-head"><h2>Circuit Breakers</h2></header>
+      <div class="card-body" id="circuitBreakerBody"></div>
+    </div>
+  </section>
+
+  <!-- ============ ALERTS TAB ============ -->
+  <section class="tab-panel" data-panel="alerts">
+    <div class="card">
+      <header class="card-head">
+        <h2>Recent Alerts</h2>
+        <span class="hint">Most recent watchlist alerts</span>
+      </header>
+      <div class="table-wrap">
+        <table id="alertsTable" class="data-table">
+          <thead>
+            <tr>
+              <th>Time (UTC)</th>
+              <th>Market</th>
+              <th>Reasons</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RAW TAB ============ -->
+  <section class="tab-panel" data-panel="raw">
+    <div class="card">
+      <header class="card-head">
+        <h2>Raw Report</h2>
+        <span class="hint" id="rawMeta"></span>
+      </header>
+      <pre id="rawJson" class="raw"></pre>
+    </div>
+  </section>
+
+  <footer class="footer">
+    NicheRadar dashboard · client-side only · serve with <code>python -m http.server</code> from project root.
+  </footer>
+</div>
+
+<script src="./app.js"></script>
+</body>
+</html>

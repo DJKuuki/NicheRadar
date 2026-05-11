@@ -9,6 +9,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
+from bot.evidence_source_finder import SourceSuggestion
 from bot.http_cache import HttpCache, RateLimiter
 from bot.models import Evidence, ParsedMarket
 
@@ -21,6 +22,8 @@ class EvidenceSource:
     url: str
     keywords: list[str]
     reliability: float
+    origin: str = "registry"
+    rationale: str = ""
 
 
 class EvidenceCollector:
@@ -33,6 +36,8 @@ class EvidenceCollector:
         cache_path: str | None = None,
         cache_seconds: float = 0,
         rate_limit_seconds: float = 0,
+        source_finder: Any | None = None,
+        llm_source_policy: str = "missing_or_mismatch",
     ) -> None:
         self.timeout = timeout
         self.retries = retries
@@ -41,12 +46,31 @@ class EvidenceCollector:
         self.cache = HttpCache(cache_path) if cache_path else None
         self.rate_limiter = RateLimiter(rate_limit_seconds)
         self.sources = self._load_registry(registry_path)
+        self.source_finder = source_finder
+        self.llm_source_policy = llm_source_policy
 
     def collect(self, parsed: ParsedMarket, now: datetime) -> Evidence:
-        source = self._find_source(parsed)
-        if source is None:
-            return self._fallback_evidence(parsed)
+        sources = self._candidate_sources(parsed)
+        if not sources:
+            extra_reason = "llm_source_finder=no_sources" if self.source_finder is not None else None
+            return self._fallback_evidence(parsed, extra_reason=extra_reason)
 
+        best_evidence: Evidence | None = None
+        failed_reasons: list[str] = []
+        for source in sources:
+            evidence = self._collect_from_source(parsed, now, source)
+            if evidence.mode == "source":
+                if best_evidence is None or self._source_rank(evidence) > self._source_rank(best_evidence):
+                    best_evidence = evidence
+            elif evidence.reasons:
+                failed_reasons.extend(reason for reason in evidence.reasons if reason.startswith("source_fetch_failed="))
+
+        if best_evidence is not None:
+            return best_evidence
+
+        return self._fallback_evidence(parsed, source=sources[0], extra_reason=failed_reasons[0] if failed_reasons else None)
+
+    def _collect_from_source(self, parsed: ParsedMarket, now: datetime, source: EvidenceSource) -> Evidence:
         if source.source_type not in {"rss", "atom"}:
             return self._fallback_evidence(
                 parsed,
@@ -71,6 +95,7 @@ class EvidenceCollector:
 
         reasons = [
             f"evidence_source={source.url}",
+            f"evidence_source_origin={source.origin}",
             f"recent_entries_30d={len(recent_entries)}",
             f"keyword_hits_30d={keyword_hits}",
             f"latest_entry_age_days={latest_age:.1f}",
@@ -79,6 +104,12 @@ class EvidenceCollector:
             f"partner_score={partner:.2f}",
             f"source_reliability={source.reliability:.2f}",
         ]
+        if source.rationale:
+            reasons.append(f"source_rationale={source.rationale}")
+        # 提取匹配关键词的原始条目（限制前 5 条以防 context 溢出）
+        matching_entries = [e for e in recent_entries if self._entry_matches(e, source.keywords)]
+        raw_entries_to_save = matching_entries[:5]
+
         return Evidence(
             score=round(score, 4),
             confidence=round(confidence, 4),
@@ -93,6 +124,66 @@ class EvidenceCollector:
             cadence_score=round(cadence, 4),
             partner_score=round(partner, 4),
             source_reliability=round(source.reliability, 4),
+            raw_entries=raw_entries_to_save
+        )
+
+    def _candidate_sources(self, parsed: ParsedMarket) -> list[EvidenceSource]:
+        registry_source = self._find_source(parsed)
+        registry_matches_market = registry_source is not None and self._source_matches_market(registry_source, parsed)
+        sources: list[EvidenceSource] = []
+        should_query_llm = self._should_query_llm_source_finder(parsed, registry_source)
+
+        if should_query_llm and self.source_finder is not None:
+            for suggestion in self.source_finder.find_sources(parsed):
+                sources.append(self._source_from_suggestion(parsed, suggestion))
+
+        if registry_source is not None and (registry_matches_market or not should_query_llm):
+            sources.append(registry_source)
+
+        return self._dedupe_sources(sources)
+
+    def _should_query_llm_source_finder(self, parsed: ParsedMarket, source: EvidenceSource | None) -> bool:
+        if self.source_finder is None:
+            return False
+        if self.llm_source_policy == "always":
+            return True
+        if self.llm_source_policy == "missing":
+            return source is None
+        if self.llm_source_policy == "missing_or_mismatch":
+            return source is None or not self._source_matches_market(source, parsed)
+        return False
+
+    def _source_matches_market(self, source: EvidenceSource, parsed: ParsedMarket) -> bool:
+        text = f"{parsed.market.title} {parsed.market.description} {parsed.market.rules} {parsed.action}".lower()
+        return any(keyword and keyword in text for keyword in source.keywords)
+
+    def _source_from_suggestion(self, parsed: ParsedMarket, suggestion: SourceSuggestion) -> EvidenceSource:
+        return EvidenceSource(
+            subject=parsed.subject,
+            platform=parsed.platform,
+            source_type=suggestion.source_type,
+            url=suggestion.url,
+            keywords=suggestion.keywords,
+            reliability=suggestion.reliability,
+            origin="llm",
+            rationale=suggestion.rationale,
+        )
+
+    def _dedupe_sources(self, sources: list[EvidenceSource]) -> list[EvidenceSource]:
+        deduped: list[EvidenceSource] = []
+        seen_urls: set[str] = set()
+        for source in sources:
+            if source.url in seen_urls:
+                continue
+            deduped.append(source)
+            seen_urls.add(source.url)
+        return deduped
+
+    def _source_rank(self, evidence: Evidence) -> tuple[int, float, float]:
+        return (
+            int(evidence.keyword_hits_30d or 0),
+            float(evidence.source_reliability or 0.0),
+            float(evidence.recent_entries_30d or 0),
         )
 
     def _find_source(self, parsed: ParsedMarket) -> EvidenceSource | None:
@@ -120,6 +211,8 @@ class EvidenceCollector:
                     url=str(row["url"]),
                     keywords=[str(item).lower() for item in row.get("keywords", [])],
                     reliability=float(row.get("reliability", 0.6)),
+                    origin=str(row.get("origin", "registry")),
+                    rationale=str(row.get("rationale", "")),
                 )
             )
         return sources

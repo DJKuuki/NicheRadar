@@ -5,6 +5,7 @@ from datetime import datetime
 from datetime import timezone
 import time
 
+from bot.common import setup_logging
 from bot.config import BotConfig
 from bot.backtest_dataset import load_backtest_samples, load_historical_backtest_samples
 from bot.backtest_engine import BacktestStrategyParams
@@ -20,6 +21,7 @@ from bot.calibration import (
     write_calibration_json,
     write_calibration_markdown,
 )
+from bot.cli import build_parser
 from bot.evidence_collector import EvidenceCollector
 from bot.execution_engine import build_trade_idea
 from bot.market_parser import parse_market, utc_now
@@ -51,129 +53,14 @@ from bot.watchlist import (
     load_latest_watchlist_snapshots,
     load_watchlist,
 )
-from bot.historical_fetcher import HistoricalFetcher, DEFAULT_KEYWORDS
+from bot.historical_fetcher import HistoricalFetcher
 from bot.historical_storage import HistoricalStore
 from bot.historical_snapshot_builder import build_historical_snapshots
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the PolyMarket shadow bot.")
-    parser.add_argument("--sample-data", help="Path to sample market json data.")
-    parser.add_argument("--live", action="store_true", help="Fetch live markets from Polymarket.")
-    parser.add_argument("--limit", type=int, default=20, help="Live market fetch limit.")
-    parser.add_argument("--watchlist", help="Path to watchlist json. Implies focused live market mode.")
-    parser.add_argument("--poll-seconds", type=int, default=0, help="Polling interval in seconds for watchlist mode.")
-    parser.add_argument("--iterations", type=int, default=1, help="How many polling iterations to run.")
-    parser.add_argument("--log-file", default="logs/watchlist_snapshots.jsonl", help="Path to watchlist snapshot log file.")
-    parser.add_argument("--alert-file", default="logs/watchlist_alerts.jsonl", help="Path to watchlist alert log file.")
-    parser.add_argument("--shadow-file", default="logs/shadow_fills.jsonl", help="Path to shadow fill log file.")
-    parser.add_argument("--db-file", default="logs/watchlist.sqlite", help="Path to SQLite watchlist database.")
-    parser.add_argument("--shadow-replay", action="store_true", help="Replay shadow fills from SQLite and print PnL summary.")
-    parser.add_argument("--settlement-file", help="Optional JSON file with manual shadow close/settlement records.")
-    parser.add_argument("--validate-settlements", action="store_true", help="Validate settlement file coverage and conflicts against shadow fills.")
-    parser.add_argument("--settlement-validation-json", help="Optional path to write settlement validation JSON.")
-    parser.add_argument("--replay-json", help="Optional path to write the full shadow replay JSON report.")
-    parser.add_argument("--dashboard-report", action="store_true", help="Build a compact SQLite report for edge, alerts, and shadow PnL.")
-    parser.add_argument("--report-file", default="logs/dashboard_report.md", help="Path to write the dashboard markdown report.")
-    parser.add_argument("--report-json", help="Optional path to write the dashboard JSON report.")
-    parser.add_argument("--report-html", default="logs/dashboard.html", help="Path to write the local HTML dashboard.")
-    parser.add_argument("--report-limit", type=int, default=10, help="Maximum rows shown in report detail sections.")
-    parser.add_argument("--calibration-report", action="store_true", help="Build a model-profile calibration report from shadow samples.")
-    parser.add_argument("--calibration-file", default="logs/calibration_report.md", help="Path to write the calibration markdown report.")
-    parser.add_argument("--calibration-json", help="Optional path to write the full calibration JSON report.")
-    parser.add_argument("--calibration-min-samples", type=int, default=5, help="Minimum shadow samples required before suggesting parameter changes.")
-    parser.add_argument("--backtest", action="store_true", help="Build an offline backtest report from local SQLite history.")
-    parser.add_argument("--backtest-report", default="logs/backtest_report.md", help="Path to write the backtest markdown report.")
-    parser.add_argument("--backtest-json", default="logs/backtest_report.json", help="Path to write the backtest JSON report.")
-    parser.add_argument("--backtest-min-samples", type=int, default=20, help="Minimum settled samples used for reliability warnings.")
-    parser.add_argument("--backtest-target-source", choices=["settlement_file", "latest_mark", "snapshot_mid"], help="Optional target source filter.")
-    parser.add_argument("--backtest-profile", help="Optional model_profile filter for entry replay.")
-    parser.add_argument("--backtest-event-type", help="Optional event_type filter for entry replay.")
-    parser.add_argument("--backtest-from", dest="backtest_from", help="Inclusive backtest start date, YYYY-MM-DD.")
-    parser.add_argument("--backtest-to", dest="backtest_to", help="Inclusive backtest end date, YYYY-MM-DD.")
-    parser.add_argument("--backtest-min-net-edge", type=float, default=0.0, help="Minimum net_edge for replayed shadow entry eligibility.")
-    parser.add_argument("--backtest-max-spread", type=float, help="Maximum side spread for replayed shadow entry eligibility.")
-    # ---- Historical data arguments ----
-    parser.add_argument("--fetch-history", action="store_true", help="Fetch resolved markets + CLOB price history from Polymarket and store in history-db.")
-    parser.add_argument("--build-history-snapshots", action="store_true", help="Build virtual snapshots from historical price data and store in history-db.")
-    parser.add_argument("--history-backtest", action="store_true", help="Run backtest report using historical snapshots (auto-settled from outcome_yes).")
-    parser.add_argument("--history-calibrate", action="store_true", help="Run calibration report using historical snapshots.")
-    parser.add_argument("--history-db", default="logs/historical.sqlite", help="Path to historical data SQLite database.")
-    parser.add_argument("--history-keywords", default="", help="Comma-separated keywords to filter historical markets (default: built-in list).")
-    parser.add_argument("--history-min-volume", type=float, default=1000.0, help="Minimum volume for historical market inclusion.")
-    parser.add_argument("--history-start-date", default="2023-01-01", help="Start date (YYYY-MM-DD) for historical market fetch.")
-    parser.add_argument("--history-max-markets", type=int, default=5000, help="Maximum number of historical markets to fetch.")
-    parser.add_argument("--history-fidelity", type=int, default=360, help="Price bar granularity in minutes (default 360 = 6h).")
-    parser.add_argument("--history-max-days-before-close", type=float, default=None, help="Only include historical snapshots within this many days of market close.")
-    parser.add_argument("--history-backtest-report", default="logs/history_backtest_report.md", help="Path to write the historical backtest markdown report.")
-    parser.add_argument("--history-backtest-json", default="logs/history_backtest_report.json", help="Path to write the historical backtest JSON report.")
-    parser.add_argument("--history-calibration-file", default="logs/history_calibration_report.md", help="Path to write the historical calibration markdown report.")
-    parser.add_argument("--history-calibration-json", default="", help="Optional path to write the historical calibration JSON report.")
-    parser.add_argument("--shadow-bankroll", type=float, default=1000.0, help="Shadow bankroll used for exposure sizing.")
-    parser.add_argument("--shadow-position-risk-pct", type=float, default=0.02, help="Bankroll fraction risked per shadow fill.")
-    parser.add_argument("--max-total-risk-pct", type=float, default=0.20, help="Maximum total open shadow exposure as bankroll fraction.")
-    parser.add_argument("--max-market-risk-pct", type=float, default=0.02, help="Maximum open shadow exposure per market as bankroll fraction.")
-    parser.add_argument("--max-event-type-risk-pct", type=float, default=0.08, help="Maximum open shadow exposure per event type as bankroll fraction.")
-    parser.add_argument("--circuit-breaker-loss-pct", type=float, default=0.05, help="Pause new shadow fills if unrealized PnL falls below this bankroll fraction.")
-    parser.add_argument("--max-open-shadow-positions", type=int, default=10, help="Maximum number of open shadow positions.")
-    parser.add_argument("--cache-file", default="logs/http_cache.sqlite", help="Path to HTTP cache SQLite database.")
-    parser.add_argument("--gamma-cache-seconds", type=float, default=30.0, help="Gamma API cache TTL in seconds.")
-    parser.add_argument("--book-cache-seconds", type=float, default=10.0, help="CLOB book cache TTL in seconds.")
-    parser.add_argument("--rss-cache-seconds", type=float, default=900.0, help="RSS/Atom cache TTL in seconds.")
-    parser.add_argument("--api-rate-limit-seconds", type=float, default=0.10, help="Minimum delay between Polymarket API requests.")
-    parser.add_argument("--rss-rate-limit-seconds", type=float, default=0.25, help="Minimum delay between RSS requests.")
-    parser.add_argument(
-        "--watchlist-max-days",
-        type=float,
-        default=120.0,
-        help="Maximum days to expiry allowed in watchlist mode.",
-    )
-    parser.add_argument(
-        "--alert-evidence-jump",
-        type=float,
-        default=0.15,
-        help="Minimum evidence score increase needed to write an alert.",
-    )
-    parser.add_argument(
-        "--evidence-sources",
-        default="data/evidence_sources.json",
-        help="Path to evidence source registry json.",
-    )
-    # ---- AI辩论模式参数 ----
-    parser.add_argument(
-        "--debate-mode",
-        action="store_true",
-        help="开启 AI 辩论模式：用AI分析取代启发式 logit 信号引擎。"
-             "默认为终端交互模式（每个市场分析要手动操作）。",
-    )
-    parser.add_argument(
-        "--debate-rounds",
-        type=int,
-        default=1,
-        help="AI辩论中 Judge 迨代次数（0=无Judge过滤，默认=1）。",
-    )
-    parser.add_argument(
-        "--debate-mode-type",
-        choices=["terminal", "batch"],
-        default="terminal",
-        help="辩论交互模式：terminal=终端手动交互，batch=文件交换模式。",
-    )
-    parser.add_argument(
-        "--debate-inbox",
-        default="logs/ai_inbox",
-        help="批量模式下辩论包写入目录。",
-    )
-    parser.add_argument(
-        "--debate-outbox",
-        default="logs/ai_outbox",
-        help="批量模式下 AI 回复读取目录。",
-    )
-    parser.add_argument(
-        "--debate-min-edge",
-        type=float,
-        default=0.05,
-        help="AI辩论信号要求的最小 Edge（AI估计概率与市场价之差），默认 0.05。",
-    )
+    setup_logging()
+    parser = build_parser()
     args = parser.parse_args()
 
     # ---- Historical data modes (independent of shadow bot state) ----
@@ -272,16 +159,28 @@ def main() -> None:
             print(f"wrote_report_html={args.report_html}")
         return
 
+    # ---- Automatic Discovery Engine (initialized here, runs inside loop) ----
+    discovery_engine = None
+    if getattr(args, "auto_discover", False):
+        from bot.market_discovery import DiscoveryEngine
+        discovery_engine = DiscoveryEngine(
+            watchlist_path=args.watchlist or "data/watchlist.json",
+            gamma_cache_seconds=args.gamma_cache_seconds,
+        )
+        print("auto_discovery_engine=initialized")
+
     collector = EvidenceCollector(
         args.evidence_sources,
         cache_path=args.cache_file,
         cache_seconds=args.rss_cache_seconds,
         rate_limit_seconds=args.rss_rate_limit_seconds,
+        source_finder=_build_source_finder(args),
+        llm_source_policy=args.llm_source_policy,
     )
     watchlist_items = load_watchlist(args.watchlist) if args.watchlist else []
     if watchlist_items:
         watchlist_config = _build_config(args, max_days_to_expiry=args.watchlist_max_days)
-        _run_watchlist_loop(args, watchlist_config, collector, watchlist_items)
+        _run_watchlist_loop(args, watchlist_config, collector, watchlist_items, discovery_engine=discovery_engine)
         return
 
     now = utc_now().astimezone(timezone.utc)
@@ -342,12 +241,17 @@ def _run_watchlist_loop(
     config: BotConfig,
     collector: EvidenceCollector,
     watchlist_items,
+    discovery_engine=None,
 ) -> None:
     iterations = max(1, args.iterations)
     poll_seconds = max(0, args.poll_seconds)
+    # 使用可变列表以便循环中动态追加新发现的市场
+    watchlist_items = list(watchlist_items)
     slugs = [item.slug for item in watchlist_items]
     previous_by_slug = load_latest_watchlist_snapshots(args.log_file)
     store = WatchlistStore(args.db_file) if args.db_file else None
+    # 自动发现每 N 轮触发一次（默认每 10 轮）
+    discovery_interval = getattr(args, "discovery_interval", 10)
 
     # 初始化 AI 辩论调度器（仅在 --debate-mode 开启时）
     orchestrator = None
@@ -367,6 +271,28 @@ def _run_watchlist_loop(
 
     for iteration in range(1, iterations + 1):
         now = utc_now().astimezone(timezone.utc)
+
+        # ---- 周期性自动发现（每 discovery_interval 轮执行一次，第1轮也执行）----
+        if discovery_engine is not None and (iteration == 1 or iteration % discovery_interval == 0):
+            added = discovery_engine.discover_and_append(limit=args.discovery_limit)
+            if added:
+                print(f"auto_discovery_added count={len(added)} slugs={','.join(added)}")
+                # 动态加载新市场到当前运行时列表
+                from bot.watchlist import load_watchlist
+                try:
+                    updated_items = load_watchlist(args.watchlist)
+                    new_slugs = [s for s in added if s not in slugs]
+                    for new_item in updated_items:
+                        if new_item.slug in new_slugs:
+                            watchlist_items.append(new_item)
+                            slugs.append(new_item.slug)
+                    if new_slugs:
+                        print(f"auto_discovery_appended_to_runtime count={len(new_slugs)}")
+                except Exception as disc_err:
+                    print(f"auto_discovery_runtime_append_failed err={disc_err}")
+            else:
+                print("auto_discovery_no_new_markets")
+
         markets = load_live_markets_by_slugs(
             slugs,
             cache_path=args.cache_file,
@@ -609,6 +535,21 @@ def _build_evidence_text(evidence, parsed) -> str:
     for reason in (evidence.reasons or []):
         lines.append(f"  - {reason}")
 
+    # 原始新闻详情
+    if hasattr(evidence, "raw_entries") and evidence.raw_entries:
+        lines.append("")
+        lines.append("[Detailed News Entries]")
+        for i, entry in enumerate(evidence.raw_entries, 1):
+            title = entry.get("title", "No Title")
+            summary = entry.get("summary", "")[:200] # 截断摘要
+            pub_date = entry.get("published")
+            lines.append(f"{i}. {title}")
+            if pub_date:
+                lines.append(f"   Date: {pub_date}")
+            if summary:
+                lines.append(f"   Summary: {summary}...")
+            lines.append("")
+
     return "\n".join(lines)
 
 
@@ -622,6 +563,19 @@ def _build_config(args: argparse.Namespace, max_days_to_expiry: float | None = N
         max_event_type_risk_pct=args.max_event_type_risk_pct,
         circuit_breaker_loss_pct=args.circuit_breaker_loss_pct,
         max_open_shadow_positions=args.max_open_shadow_positions,
+    )
+
+
+def _build_source_finder(args: argparse.Namespace):
+    if not getattr(args, "llm_source_finder", False):
+        return None
+    from bot.evidence_source_finder import LlmEvidenceSourceFinder
+
+    return LlmEvidenceSourceFinder(
+        mode=args.llm_source_mode,
+        inbox_dir=args.llm_source_inbox,
+        outbox_dir=args.llm_source_outbox,
+        max_sources=args.llm_source_max_sources,
     )
 
 

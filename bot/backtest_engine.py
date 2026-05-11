@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .common import as_float as _float, as_str_list as _string_list
+
 
 @dataclass(frozen=True)
 class BacktestStrategyParams:
@@ -110,13 +112,3 @@ def _reason_value(reasons: list[str], key: str) -> str | None:
     return None
 
 
-def _string_list(value: object) -> list[str]:
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    return []
-
-
-def _float(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None

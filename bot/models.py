@@ -77,6 +77,7 @@ class Evidence:
     cadence_score: float | None = None
     partner_score: float | None = None
     source_reliability: float | None = None
+    raw_entries: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

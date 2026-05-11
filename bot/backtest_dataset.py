@@ -4,10 +4,9 @@ from dataclasses import asdict, dataclass
 import json
 import sqlite3
 from contextlib import closing
-from pathlib import Path
-from typing import Any
 
 from bot.backtest_engine import BacktestStrategyParams, evaluate_shadow_entry
+from bot.common import as_float as _float, as_str_list as _string_list
 from bot.shadow_replay import Settlement
 
 
@@ -270,18 +269,6 @@ def _reason_value(reasons: list[str], key: str) -> str | None:
     for reason in reasons:
         if reason.startswith(prefix):
             return reason[len(prefix) :]
-    return None
-
-
-def _string_list(value: object) -> list[str]:
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    return []
-
-
-def _float(value: object) -> float | None:
-    if isinstance(value, (int, float)):
-        return float(value)
     return None
 
 

@@ -6,6 +6,13 @@ from pathlib import Path
 
 from bot.backtest_dataset import BacktestSample, samples_to_dicts
 from bot.backtest_metrics import build_backtest_metrics
+from bot.common import (
+    as_dict as _dict,
+    as_list_of_dicts as _list,
+    as_str_list as _str_list,
+    fmt_number as _fmt,
+    fmt_percent as _pct,
+)
 
 
 def build_backtest_report(samples: list[BacktestSample], db_path: str, min_samples: int = 20) -> dict[str, object]:
@@ -148,21 +155,3 @@ def _bucket_section(title: str, label: str, rows: list[dict[str, object]]) -> li
     return lines
 
 
-def _dict(value: object) -> dict[str, object]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: object) -> list[dict[str, object]]:
-    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
-
-
-def _str_list(value: object) -> list[str]:
-    return [str(item) for item in value] if isinstance(value, list) else []
-
-
-def _fmt(value: object) -> str:
-    return "none" if not isinstance(value, (int, float)) else f"{float(value):.4f}"
-
-
-def _pct(value: object) -> str:
-    return "none" if not isinstance(value, (int, float)) else f"{float(value):.2%}"
