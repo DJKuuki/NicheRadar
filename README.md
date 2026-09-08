@@ -60,11 +60,17 @@ NicheRadar/
 │   ├── __init__.py
 │   ├── xtracker_client.py       # Official XTracker REST API client
 │   ├── tweet_poisson_model.py   # Negative Binomial & Poisson pricing engine
-│   └── tweet_market_scanner.py  # Polymarket Gamma API scanner & bracket matcher
+│   ├── tweet_market_scanner.py  # Polymarket Gamma API scanner & bracket matcher
+│   ├── shadow_storage.py        # SQLite persistence layer for virtual accounts & orders
+│   ├── shadow_engine.py         # Realistic Maker/Taker order placement & fill simulator
+│   ├── settlement_monitor.py    # Auto-settlement sync with Gamma API & XTracker
+│   └── performance_analytics.py # Empirical PnL, Drawdown, and Brier Score calibration gate
 ├── scripts/
-│   └── run_tweet_arbitrage.py   # CLI entrypoint for live market scanning
+│   ├── run_tweet_arbitrage.py   # CLI entrypoint for live market scanning
+│   └── run_shadow_trader.py     # CLI runner & real-time dashboard for Shadow Paper Trading
 ├── tests/
-│   └── test_tweet_strategy.py   # Comprehensive unit & regression tests
+│   ├── test_tweet_strategy.py   # Probability & bracket pricing tests
+│   └── test_shadow_trading.py   # Fills, settlements, and Brier score tests
 ├── requirements.txt
 ├── .gitignore
 ├── LICENSE
@@ -80,9 +86,9 @@ NicheRadar/
 pip install -r requirements.txt
 ```
 
-### 2. Run Unit Tests
+### 2. Run All Unit Tests
 ```bash
-pytest tests/test_tweet_strategy.py -v
+pytest tests/ -v
 ```
 
 ### 3. Run Live Market Arbitrage Scanner
@@ -90,9 +96,19 @@ pytest tests/test_tweet_strategy.py -v
 python scripts/run_tweet_arbitrage.py --scan
 ```
 
-### 4. Export Scanned Signals as JSON
+### 4. Run Shadow Paper Trading Engine (One-Shot)
 ```bash
-python scripts/run_tweet_arbitrage.py --scan --json-out signals.json
+python scripts/run_shadow_trader.py --once
+```
+
+### 5. View Real-Time Dashboard & Brier Calibration Score
+```bash
+python scripts/run_shadow_trader.py --report
+```
+
+### 6. Run Continuous Shadow Daemon
+```bash
+python scripts/run_shadow_trader.py --daemon --scan-interval 60 --fill-interval 30
 ```
 
 ---
