@@ -126,17 +126,29 @@ class TweetMarketScanner:
     ) -> list[tuple[ScannedTweetEvent, TrackingProgress | None, list[BracketEvaluation]]]:
         """Full end-to-end pipeline: scan markets, correlate xtracker, and evaluate edges."""
         # 1. Update historical model parameters from XTracker
-        user_info = self.xtracker.get_user_info(handle)
-        user_id = user_info.get("id")
-        if user_id:
-            mean_d, var_d, _ = self.xtracker.calculate_historical_daily_stats(user_id)
-            self.model.update_historical_parameters(mean_d, var_d)
+        try:
+            user_info = self.xtracker.get_user_info(handle)
+            user_id = user_info.get("id")
+            if user_id:
+                mean_d, var_d, _ = self.xtracker.calculate_historical_daily_stats(user_id)
+                self.model.update_historical_parameters(mean_d, var_d)
+        except Exception as exc:
+            logger.warning("Failed to refresh historical stats for %s: %s (continuing with current parameters)", handle, exc)
 
-        events = self.fetch_active_tweet_events(handle=handle)
+        try:
+            events = self.fetch_active_tweet_events(handle=handle)
+        except Exception as exc:
+            logger.error("Failed to fetch active tweet events from Gamma: %s", exc)
+            return []
+
         results = []
 
         for ev in events:
-            progress = self.match_with_xtracker(ev, handle=handle)
+            try:
+                progress = self.match_with_xtracker(ev, handle=handle)
+            except Exception as exc:
+                logger.warning("Failed to match XTracker progress for %s: %s", ev.slug, exc)
+                progress = None
             current_count = progress.current_count if progress else 0
             now = datetime.now(timezone.utc)
             remaining_hours = max(0.0, (ev.end_date - now).total_seconds() / 3600.0)

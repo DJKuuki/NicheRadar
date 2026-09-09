@@ -189,24 +189,33 @@ def main() -> None:
             now = time.monotonic()
             if now - last_scan >= args.scan_interval:
                 print(f"\n--- [CYCLE SCAN] {datetime.now(timezone.utc).isoformat()} ---")
-                scan_results = scanner.scan_and_evaluate(handle="elonmusk")
-                candidates = candidates_from_scan_results(scan_results, min_edge=args.min_edge)
-                new_orders = engine.evaluate_and_place_orders(candidates)
-                if new_orders:
-                    print(f"Placed {len(new_orders)} new shadow orders.")
+                try:
+                    scan_results = scanner.scan_and_evaluate(handle="elonmusk")
+                    candidates = candidates_from_scan_results(scan_results, min_edge=args.min_edge)
+                    new_orders = engine.evaluate_and_place_orders(candidates)
+                    if new_orders:
+                        print(f"Placed {len(new_orders)} new shadow orders.")
+                except Exception as exc:
+                    print(f"⚠️ [SCAN WARNING] {type(exc).__name__}: {exc} (will retry next cycle)")
                 last_scan = now
 
             if now - last_fill >= args.fill_interval:
-                fills = engine.check_and_update_fills()
-                if fills:
-                    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {len(fills)} orders FILLED.")
+                try:
+                    fills = engine.check_and_update_fills()
+                    if fills:
+                        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {len(fills)} orders FILLED.")
+                except Exception as exc:
+                    print(f"⚠️ [FILL WARNING] {type(exc).__name__}: {exc}")
                 last_fill = now
 
             if now - last_settle >= args.settle_interval:
-                settled = monitor.check_and_sync_settlements()
-                if settled:
-                    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {len(settled)} orders SETTLED.")
-                print_report(storage)
+                try:
+                    settled = monitor.check_and_sync_settlements()
+                    if settled:
+                        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {len(settled)} orders SETTLED.")
+                    print_report(storage)
+                except Exception as exc:
+                    print(f"⚠️ [SETTLE WARNING] {type(exc).__name__}: {exc}")
                 last_settle = now
 
             time.sleep(2)

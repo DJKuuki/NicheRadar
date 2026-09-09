@@ -51,26 +51,78 @@ class XTrackerClient:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NicheRadar-XTracker/1.0",
             "Accept": "application/json",
         })
+        self._user_info_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._user_metrics_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._stats_cache: dict[str, tuple[float, tuple[float, float, list[int]]]] = {}
 
-    def get_user_info(self, handle: str = "elonmusk") -> dict[str, Any]:
-        """Fetch user profile and active trackings list."""
+    def _get_json_with_retry(
+        self, url: str, max_retries: int = 3, backoff_sec: float = 1.5
+    ) -> dict[str, Any]:
+        """Performs GET request with retries and exponential backoff for 5xx errors."""
+        last_error: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                resp = self.session.get(url, timeout=self.timeout_sec)
+                # If 5xx server error, wait and retry
+                if 500 <= resp.status_code < 600:
+                    logger.warning("XTracker 5xx error (attempt %d/%d) at %s: %s", attempt, max_retries, url, resp.status_code)
+                    if attempt < max_retries:
+                        time.sleep(backoff_sec * (2 ** (attempt - 1)))
+                        continue
+                resp.raise_for_status()
+                payload = resp.json()
+                if not payload.get("success"):
+                    raise ValueError(f"XTracker API error at {url}: {payload}")
+                return payload
+            except (requests.exceptions.RequestException, ValueError) as exc:
+                last_error = exc
+                if attempt < max_retries:
+                    time.sleep(backoff_sec * (2 ** (attempt - 1)))
+                else:
+                    logger.error("XTracker request failed after %d attempts at %s: %s", max_retries, url, exc)
+
+        assert last_error is not None
+        raise last_error
+
+    def get_user_info(self, handle: str = "elonmusk", ttl_sec: float = 60.0) -> dict[str, Any]:
+        """Fetch user profile and active trackings list with TTL caching and stale fallback."""
+        now = time.monotonic()
+        if handle in self._user_info_cache:
+            cached_time, cached_val = self._user_info_cache[handle]
+            if now - cached_time < ttl_sec:
+                return cached_val
+
         url = f"{self.base_url}/users/{handle}?includeStats=true"
-        resp = self.session.get(url, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        payload = resp.json()
-        if not payload.get("success"):
-            raise ValueError(f"XTracker API error for user {handle}: {payload}")
-        return payload.get("data", {})
+        try:
+            payload = self._get_json_with_retry(url)
+            data = payload.get("data", {})
+            self._user_info_cache[handle] = (now, data)
+            return data
+        except Exception as exc:
+            if handle in self._user_info_cache:
+                logger.warning("Using stale cached user info for %s after error: %s", handle, exc)
+                return self._user_info_cache[handle][1]
+            raise exc
 
-    def get_user_metrics(self, user_id: str) -> list[dict[str, Any]]:
-        """Fetch full historical daily metrics for user."""
+    def get_user_metrics(self, user_id: str, ttl_sec: float = 300.0) -> list[dict[str, Any]]:
+        """Fetch full historical daily metrics for user with TTL caching and stale fallback."""
+        now = time.monotonic()
+        if user_id in self._user_metrics_cache:
+            cached_time, cached_val = self._user_metrics_cache[user_id]
+            if now - cached_time < ttl_sec:
+                return cached_val
+
         url = f"{self.base_url}/metrics/{user_id}"
-        resp = self.session.get(url, timeout=self.timeout_sec)
-        resp.raise_for_status()
-        payload = resp.json()
-        if not payload.get("success"):
-            raise ValueError(f"XTracker API error for metrics {user_id}: {payload}")
-        return payload.get("data", [])
+        try:
+            payload = self._get_json_with_retry(url)
+            data = payload.get("data", [])
+            self._user_metrics_cache[user_id] = (now, data)
+            return data
+        except Exception as exc:
+            if user_id in self._user_metrics_cache:
+                logger.warning("Using stale cached metrics for %s after error: %s", user_id, exc)
+                return self._user_metrics_cache[user_id][1]
+            raise exc
 
     def list_trackings(self, handle: str = "elonmusk") -> list[UserTracking]:
         """List all tracking sessions for user as structured objects."""
@@ -148,12 +200,16 @@ class XTrackerClient:
         )
 
     def calculate_historical_daily_stats(
-        self, user_id: str, lookback_days: int = 90
+        self, user_id: str, lookback_days: int = 90, ttl_sec: float = 3600.0
     ) -> tuple[float, float, list[int]]:
-        """Calculate mean and variance of daily post counts across historical data.
+        """Calculate mean and variance of daily post counts across historical data with caching."""
+        cache_key = f"{user_id}_{lookback_days}"
+        now = time.monotonic()
+        if cache_key in self._stats_cache:
+            cached_time, cached_val = self._stats_cache[cache_key]
+            if now - cached_time < ttl_sec:
+                return cached_val
 
-        Returns (mean_daily, variance_daily, daily_counts_list).
-        """
         metrics = self.get_user_metrics(user_id)
         # Sort by date descending
         daily_items = [m for m in metrics if m.get("type") == "daily"]
@@ -171,7 +227,9 @@ class XTrackerClient:
         n = len(counts)
         mean_c = sum(counts) / n
         var_c = sum((x - mean_c) ** 2 for x in counts) / (n - 1) if n > 1 else mean_c
-        return mean_c, var_c, counts
+        res = (mean_c, var_c, counts)
+        self._stats_cache[cache_key] = (now, res)
+        return res
 
     @staticmethod
     def _parse_iso(s: str | None) -> datetime | None:
