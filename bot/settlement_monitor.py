@@ -106,14 +106,16 @@ class SettlementMonitor:
         yes_price = prices[0]
         no_price = prices[1]
 
+        # Must be officially closed or resolved by Polymarket
+        if not (closed or resolved):
+            return None
+
         # Resolution criteria:
-        # Either marked closed/resolved AND prices are at boundary (>= 0.95 vs <= 0.05),
-        # or prices already collapsed to 1.0 / 0.0
-        if (closed or resolved) or (yes_price >= 0.99 or no_price >= 0.99):
-            if yes_price >= 0.90 and no_price <= 0.10:
-                return {"yes_won": True, "yes_price": yes_price, "no_price": no_price}
-            if no_price >= 0.90 and yes_price <= 0.10:
-                return {"yes_won": False, "yes_price": yes_price, "no_price": no_price}
+        # Market is closed/resolved AND outcome prices are terminal (>= 0.90 vs <= 0.10)
+        if yes_price >= 0.90 and no_price <= 0.10:
+            return {"yes_won": True, "yes_price": yes_price, "no_price": no_price}
+        if no_price >= 0.90 and yes_price <= 0.10:
+            return {"yes_won": False, "yes_price": yes_price, "no_price": no_price}
 
         return None
 

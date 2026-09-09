@@ -229,7 +229,20 @@ def test_settlement_monitor_and_resolution(temp_storage):
     temp_storage.create_order(order)
     temp_storage.mark_order_filled("test_ord_settle", fill_price=0.20)
 
-    # Mock Gamma market resolution where YES won: outcomePrices = ["1", "0"]
+    # 1. Unclosed market with skewed prices (like deep OTM 0.0075 / 0.9925) MUST NOT settle!
+    unclosed_market = {
+        "closed": False,
+        "resolved": False,
+        "outcomePrices": ["0.0075", "0.9925"],
+    }
+    monitor_unclosed = SettlementMonitor(
+        storage=temp_storage,
+        gamma_fetcher=lambda m_id: unclosed_market,
+    )
+    unclosed_results = monitor_unclosed.check_and_sync_settlements()
+    assert len(unclosed_results) == 0  # Crucial: must not settle prematurely!
+
+    # 2. Mock Gamma market resolution where YES won: closed=True, outcomePrices = ["1", "0"]
     mock_market = {
         "closed": True,
         "resolved": True,
@@ -357,4 +370,58 @@ def test_candidates_from_scan_results():
     assert c.model_prob == 0.30
     assert c.target_price == 0.13
     assert c.net_edge == 0.18
+
+
+def test_shadow_engine_event_risk_budget_and_otm_clamp(temp_storage):
+    cands = [
+        TradeCandidate(
+            event_id="ev_multi",
+            event_slug="elon-tweets-multi",
+            market_id="mkt_regular",
+            condition_id="0xcond_reg",
+            clob_token_id="tok_reg",
+            bracket_name="120-139",
+            side="BUY_YES",
+            model_prob=0.35,
+            market_prob=0.20,
+            net_edge=0.15,
+            kelly_fraction=0.10,  # Kelly says $100, capped at max_bracket $50
+            target_price=0.20,
+        ),
+        TradeCandidate(
+            event_id="ev_multi",
+            event_slug="elon-tweets-multi",
+            market_id="mkt_deep_otm",
+            condition_id="0xcond_otm",
+            clob_token_id="tok_otm",
+            bracket_name="180+",
+            side="BUY_YES",
+            model_prob=0.10,
+            market_prob=0.02,
+            net_edge=0.08,
+            kelly_fraction=0.10,  # Kelly says $100, but OTM clamp is $15, and event budget is $60 max!
+            target_price=0.02,
+        ),
+    ]
+
+    engine = ShadowEngine(
+        storage=temp_storage,
+        config=EngineConfig(
+            max_bracket_risk_usdc=50.0,
+            max_event_risk_usdc=60.0,
+            max_otm_risk_usdc=15.0,
+            otm_threshold=0.05,
+        ),
+    )
+
+    placed = engine.evaluate_and_place_orders(cands)
+    assert len(placed) == 2
+
+    # Cand 1 cost is capped at $50
+    assert placed[0].cost_usdc <= 50.0
+
+    # Cand 2 cost must be capped by both OTM clamp ($15) AND remaining event budget ($60 - $50 = $10)
+    assert placed[1].cost_usdc <= 10.01
+    assert placed[0].cost_usdc + placed[1].cost_usdc <= 60.01
+
 

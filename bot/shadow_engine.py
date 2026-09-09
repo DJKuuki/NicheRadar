@@ -25,7 +25,9 @@ class EngineConfig:
     min_edge: float = 0.04
     max_bracket_risk_usdc: float = 50.0
     min_bracket_risk_usdc: float = 5.0
-    max_event_risk_usdc: float = 150.0
+    max_event_risk_usdc: float = 60.0  # Max total risk allocated to any single event across all brackets
+    max_otm_risk_usdc: float = 15.0    # Clamp for deep OTM brackets (limit_price < otm_threshold)
+    otm_threshold: float = 0.05
     default_fill_mode: str = "MAKER_STRICT"  # MAKER_STRICT, MAKER_TOUCH, TAKER
     request_timeout: int = 10
 
@@ -138,6 +140,9 @@ class ShadowEngine:
         account = self.storage.get_account_summary()
         available_cash = account.cash_balance
 
+        # Track cumulative committed risk per event in this cycle
+        event_committed_risk: dict[str, float] = {}
+
         for cand in candidates:
             if cand.net_edge < self.config.min_edge:
                 continue
@@ -149,14 +154,31 @@ class ShadowEngine:
             if self.storage.has_active_order_for_bracket(cand.market_id, cand.side):
                 continue
 
+            # Check Event-Level portfolio risk cap
+            if cand.event_id not in event_committed_risk:
+                event_committed_risk[cand.event_id] = self.storage.get_active_risk_for_event(cand.event_id)
+
+            current_event_risk = event_committed_risk[cand.event_id]
+            if current_event_risk >= self.config.max_event_risk_usdc:
+                continue
+
+            budget_left = self.config.max_event_risk_usdc - current_event_risk
+
             # Sizing based on Quarter-Kelly
             risk_usdc = available_cash * max(0.01, cand.kelly_fraction)
             risk_usdc = min(risk_usdc, self.config.max_bracket_risk_usdc)
-            if risk_usdc < self.config.min_bracket_risk_usdc:
-                continue
 
+            # Deep OTM risk clamp: prevent huge dollar bets on tiny penny probabilities
             limit_price = round(cand.target_price, 3)
             if limit_price <= 0.01 or limit_price >= 0.99:
+                continue
+
+            if limit_price < self.config.otm_threshold:
+                risk_usdc = min(risk_usdc, self.config.max_otm_risk_usdc)
+
+            # Cap by event budget
+            risk_usdc = min(risk_usdc, budget_left)
+            if risk_usdc < self.config.min_bracket_risk_usdc:
                 continue
 
             shares = round(risk_usdc / limit_price, 2)
@@ -192,6 +214,7 @@ class ShadowEngine:
             if self.storage.create_order(order):
                 placed_orders.append(order)
                 available_cash -= actual_cost
+                event_committed_risk[cand.event_id] = current_event_risk + actual_cost
 
         return placed_orders
 

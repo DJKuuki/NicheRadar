@@ -178,6 +178,18 @@ class ShadowStorage:
             ).fetchone()
             return row is not None
 
+    def get_active_risk_for_event(self, event_id: str) -> float:
+        """Returns total cost_usdc of all OPEN and FILLED orders for an event."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                """
+                SELECT SUM(cost_usdc) FROM shadow_orders
+                WHERE event_id = ? AND status IN ('OPEN', 'FILLED')
+                """,
+                (event_id,),
+            ).fetchone()
+            return float(row[0]) if row and row[0] is not None else 0.0
+
     def create_order(self, order: ShadowOrder) -> bool:
         """Inserts a new virtual order and locks the required cash collateral.
         
