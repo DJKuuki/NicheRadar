@@ -103,6 +103,32 @@ class TestBracketParsing(unittest.TestCase):
         spec = TweetMarketScanner._parse_bracket_question(q, {"slug": "other"})
         self.assertIsNone(spec)
 
+    def test_parse_trump_truth_social_brackets(self):
+        q1 = "Will Donald Trump post 20-39 Truth Social posts from September 4 to September 11, 2026?"
+        spec1 = TweetMarketScanner._parse_bracket_question(q1, {"slug": "trump-slug"})
+        self.assertIsNotNone(spec1)
+        self.assertEqual(spec1.low, 20)
+        self.assertEqual(spec1.high, 39)
+
+        q2 = "Will Donald Trump post 100+ Truth Social posts from September 4 to September 11, 2026?"
+        spec2 = TweetMarketScanner._parse_bracket_question(q2, {"slug": "trump-plus-slug"})
+        self.assertIsNotNone(spec2)
+        self.assertEqual(spec2.low, 100)
+        self.assertIsNone(spec2.high)
+
+    def test_parse_cz_and_whitehouse_posts(self):
+        q_cz = "Will CZ post 0-19 posts from September 4 to September 11, 2026?"
+        spec_cz = TweetMarketScanner._parse_bracket_question(q_cz, {"slug": "cz-slug"})
+        self.assertIsNotNone(spec_cz)
+        self.assertEqual(spec_cz.low, 0)
+        self.assertEqual(spec_cz.high, 19)
+
+        q_wh = "Will White House post 40-59 posts from September 4 to September 11, 2026?"
+        spec_wh = TweetMarketScanner._parse_bracket_question(q_wh, {"slug": "wh-slug"})
+        self.assertIsNotNone(spec_wh)
+        self.assertEqual(spec_wh.low, 40)
+        self.assertEqual(spec_wh.high, 59)
+
 
 if __name__ == "__main__":
     unittest.main()

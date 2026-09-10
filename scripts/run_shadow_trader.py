@@ -102,10 +102,12 @@ def run_one_cycle(
     engine: ShadowEngine,
     monitor: SettlementMonitor,
     scanner: TweetMarketScanner,
+    handles: list[str] | None = None,
     min_edge: float = 0.05,
 ) -> None:
-    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] Scanning Polymarket Tweet Markets...")
-    scan_results = scanner.scan_and_evaluate(handle="elonmusk")
+    target_names = ", ".join(handles) if handles else "default targets"
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] Scanning Polymarket Social Markets for: {target_names}...")
+    scan_results = scanner.scan_and_evaluate(handles=handles)
     candidates = candidates_from_scan_results(scan_results, min_edge=min_edge)
     print(f"Found {len(candidates)} trade candidates with positive edge >= {min_edge:.1%}.")
 
@@ -151,6 +153,12 @@ def main() -> None:
     parser.add_argument("--settle-interval", type=int, default=300, help="Seconds between settlement syncs (daemon mode)")
     parser.add_argument("--min-edge", type=float, default=0.05, help="Minimum net edge required to place orders")
     parser.add_argument("--fill-mode", default="MAKER_STRICT", choices=["MAKER_STRICT", "MAKER_TOUCH", "TAKER"], help="Fill simulation realism mode")
+    parser.add_argument(
+        "--handles",
+        nargs="+",
+        default=["elonmusk", "realDonaldTrump", "cz_binance", "WhiteHouse"],
+        help="Target handles to monitor (default: elonmusk realDonaldTrump cz_binance WhiteHouse)",
+    )
 
     args = parser.parse_args()
 
@@ -173,12 +181,13 @@ def main() -> None:
     engine = ShadowEngine(storage=storage, config=cfg)
 
     if args.once or not args.daemon:
-        run_one_cycle(storage, engine, monitor, scanner, min_edge=args.min_edge)
+        run_one_cycle(storage, engine, monitor, scanner, handles=args.handles, min_edge=args.min_edge)
         print_report(storage)
         return
 
     # Daemon loop
-    print(f"Starting NicheRadar Shadow Trading Daemon (Ctrl+C to stop)...")
+    targets_str = ", ".join(args.handles)
+    print(f"Starting NicheRadar Shadow Trading Daemon for targets: {targets_str} (Ctrl+C to stop)...")
     print(f"Scan Interval: {args.scan_interval}s | Fill Interval: {args.fill_interval}s | Settle Interval: {args.settle_interval}s")
     last_scan = 0.0
     last_fill = 0.0
@@ -190,7 +199,7 @@ def main() -> None:
             if now - last_scan >= args.scan_interval:
                 print(f"\n--- [CYCLE SCAN] {datetime.now(timezone.utc).isoformat()} ---")
                 try:
-                    scan_results = scanner.scan_and_evaluate(handle="elonmusk")
+                    scan_results = scanner.scan_and_evaluate(handles=args.handles)
                     candidates = candidates_from_scan_results(scan_results, min_edge=args.min_edge)
                     new_orders = engine.evaluate_and_place_orders(candidates)
                     if new_orders:
