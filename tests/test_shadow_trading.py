@@ -415,13 +415,136 @@ def test_shadow_engine_event_risk_budget_and_otm_clamp(temp_storage):
     )
 
     placed = engine.evaluate_and_place_orders(cands)
-    assert len(placed) == 2
-
-    # Cand 1 cost is capped at $50
+    # Cand 1 is placed ($50 max), Cand 2 is rejected by both safety corridor (<0.10) and event mutual exclusivity
+    assert len(placed) == 1
+    assert placed[0].bracket_name == "120-139"
     assert placed[0].cost_usdc <= 50.0
 
-    # Cand 2 cost must be capped by both OTM clamp ($15) AND remaining event budget ($60 - $50 = $10)
-    assert placed[1].cost_usdc <= 10.01
-    assert placed[0].cost_usdc + placed[1].cost_usdc <= 60.01
+
+def test_safety_corridor_and_mutual_exclusivity(temp_storage):
+    """Verifies that contracts with price < 0.10 or > 0.65 are rejected, and only 1 bracket per event is placed."""
+    cands = [
+        TradeCandidate(
+            event_id="ev_test",
+            event_slug="elon-tweets-test",
+            market_id="mkt_1",
+            condition_id="0x1",
+            clob_token_id="tok_1",
+            bracket_name="Bracket 1",
+            side="BUY_YES",
+            model_prob=0.35,
+            market_prob=0.20,
+            net_edge=0.15,
+            kelly_fraction=0.05,
+            target_price=0.20,  # Valid
+        ),
+        TradeCandidate(
+            event_id="ev_test",
+            event_slug="elon-tweets-test",
+            market_id="mkt_2",
+            condition_id="0x2",
+            clob_token_id="tok_2",
+            bracket_name="Bracket 2",
+            side="BUY_YES",
+            model_prob=0.30,
+            market_prob=0.22,
+            net_edge=0.08,
+            kelly_fraction=0.05,
+            target_price=0.22,  # Same event! Should be rejected
+        ),
+        TradeCandidate(
+            event_id="ev_other",
+            event_slug="trump-truth-other",
+            market_id="mkt_cheap",
+            condition_id="0x3",
+            clob_token_id="tok_3",
+            bracket_name="Bracket Cheap",
+            side="BUY_YES",
+            model_prob=0.15,
+            market_prob=0.04,
+            net_edge=0.11,
+            kelly_fraction=0.05,
+            target_price=0.04,  # < 0.10! Should be rejected by corridor
+        ),
+        TradeCandidate(
+            event_id="ev_expensive",
+            event_slug="cz-binance-other",
+            market_id="mkt_exp",
+            condition_id="0x4",
+            clob_token_id="tok_4",
+            bracket_name="Bracket Exp",
+            side="BUY_YES",
+            model_prob=0.85,
+            market_prob=0.72,
+            net_edge=0.13,
+            kelly_fraction=0.05,
+            target_price=0.72,  # > 0.65! Should be rejected by corridor
+        ),
+    ]
+
+    engine = ShadowEngine(
+        storage=temp_storage,
+        config=EngineConfig(
+            min_entry_price=0.10,
+            max_entry_price=0.65,
+        ),
+    )
+
+    placed = engine.evaluate_and_place_orders(cands)
+    # Only Bracket 1 from ev_test should be placed!
+    assert len(placed) == 1
+    assert placed[0].bracket_name == "Bracket 1"
+    assert placed[0].event_id == "ev_test"
+
+
+def test_stale_order_cancellation(temp_storage):
+    """Verifies that unfilled orders older than max_stale_order_hours are cancelled and refunded."""
+    engine = ShadowEngine(storage=temp_storage, config=EngineConfig(max_stale_order_hours=12.0))
+
+    # Place an order
+    cands = [
+        TradeCandidate(
+            event_id="ev_stale",
+            event_slug="elon-tweets-stale",
+            market_id="mkt_stale",
+            condition_id="0xcond_stale",
+            clob_token_id="tok_stale",
+            bracket_name="140-159",
+            side="BUY_YES",
+            model_prob=0.35,
+            market_prob=0.25,
+            net_edge=0.10,
+            kelly_fraction=0.05,
+            target_price=0.25,
+        )
+    ]
+    placed = engine.evaluate_and_place_orders(cands)
+    assert len(placed) == 1
+    order_id = placed[0].order_id
+    cost = placed[0].cost_usdc
+
+    # Check cash was locked
+    acc = temp_storage.get_account_summary()
+    assert acc.locked_collateral >= cost
+
+    # Manually backdate the order placed_at_utc in DB to 15 hours ago
+    import sqlite3
+    conn = sqlite3.connect(temp_storage.db_path)
+    old_time = "2026-09-01T00:00:00+00:00"
+    conn.execute("UPDATE shadow_orders SET placed_at_utc = ? WHERE order_id = ?", (old_time, order_id))
+    conn.commit()
+    conn.close()
+
+    # Cancel stale orders
+    cancelled = engine.cancel_stale_orders(max_age_hours=12.0)
+    assert len(cancelled) == 1
+    assert cancelled[0].order_id == order_id
+    assert cancelled[0].status == "CANCELED"
+
+    # Verify collateral was refunded
+    acc_after = temp_storage.get_account_summary()
+    assert acc_after.locked_collateral == 0.0
+    assert acc_after.cash_balance == acc_after.initial_bankroll
+
 
 

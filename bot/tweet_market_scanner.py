@@ -75,8 +75,12 @@ class TweetMarketScanner:
             )
         return self._models[handle]
 
-    def fetch_active_tweet_events(self, handle: str | None = None) -> list[ScannedTweetEvent]:
-        """Fetch all active tweet or social post count markets from Gamma API."""
+    def fetch_active_tweet_events(
+        self, handle: str | None = None, max_tenor_days: float | None = 8.0
+    ) -> list[ScannedTweetEvent]:
+        """Fetch all active tweet or social post count markets from Gamma API,
+        optionally filtered by maximum remaining tenor in days (default: 8.0).
+        """
         params = {
             "tag_id": "972",
             "active": "true",
@@ -90,6 +94,8 @@ class TweetMarketScanner:
             return []
 
         scanned = []
+        now = datetime.now(timezone.utc)
+
         for e in events_data:
             title = e.get("title", "")
             slug = e.get("slug", "")
@@ -114,6 +120,15 @@ class TweetMarketScanner:
                 if not any(k in title_lower or k in slug_lower for k in keywords):
                     continue
 
+            start_dt = self._parse_iso(e.get("startDate")) or now
+            end_dt = self._parse_iso(e.get("endDate")) or now
+
+            # Tenor filter: avoid capital lockup in multi-week/monthly markets
+            if max_tenor_days is not None:
+                tenor_days = (end_dt - now).total_seconds() / 86400.0
+                if tenor_days > max_tenor_days or tenor_days <= 0:
+                    continue
+
             markets = e.get("markets", [])
             brackets = []
             for m in markets:
@@ -124,9 +139,6 @@ class TweetMarketScanner:
 
             # Sort brackets by low threshold
             brackets.sort(key=lambda b: b.low)
-
-            start_dt = self._parse_iso(e.get("startDate")) or datetime.now(timezone.utc)
-            end_dt = self._parse_iso(e.get("endDate")) or datetime.now(timezone.utc)
 
             scanned.append(
                 ScannedTweetEvent(
@@ -172,7 +184,9 @@ class TweetMarketScanner:
         return None
 
     def scan_and_evaluate(
-        self, handles: list[str] | str | None = None
+        self,
+        handles: list[str] | str | None = None,
+        max_tenor_days: float | None = 8.0,
     ) -> list[tuple[ScannedTweetEvent, TrackingProgress | None, list[BracketEvaluation]]]:
         """Full end-to-end pipeline: scan markets for targets, correlate xtracker, and evaluate edges."""
         if handles is None:
@@ -198,7 +212,7 @@ class TweetMarketScanner:
                 logger.warning("Failed to refresh historical stats for %s: %s (continuing with current parameters)", handle, exc)
 
             try:
-                events = self.fetch_active_tweet_events(handle=handle)
+                events = self.fetch_active_tweet_events(handle=handle, max_tenor_days=max_tenor_days)
             except Exception as exc:
                 logger.error("Failed to fetch active events for %s from Gamma: %s", handle, exc)
                 continue

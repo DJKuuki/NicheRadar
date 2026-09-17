@@ -23,13 +23,26 @@ from bot.xtracker_client import TrackingProgress
 @dataclass
 class EngineConfig:
     min_edge: float = 0.04
+    min_entry_price: float = 0.10       # Safety corridor: strict rejection of deep OTM (< 0.10)
+    max_entry_price: float = 0.65       # Safety corridor: avoid poor payoff asymmetry (> 0.65)
     max_bracket_risk_usdc: float = 50.0
     min_bracket_risk_usdc: float = 5.0
-    max_event_risk_usdc: float = 60.0  # Max total risk allocated to any single event across all brackets
-    max_otm_risk_usdc: float = 15.0    # Clamp for deep OTM brackets (limit_price < otm_threshold)
-    otm_threshold: float = 0.05
+    max_event_risk_usdc: float = 60.0   # Max total risk allocated to any single event across all brackets
+    max_otm_risk_usdc: float = 15.0     # Backwards compatibility clamp
+    otm_threshold: float = 0.05         # Backwards compatibility threshold
+    max_stale_order_hours: float = 12.0 # Max duration an unfilled resting limit order is allowed to stay
     default_fill_mode: str = "MAKER_STRICT"  # MAKER_STRICT, MAKER_TOUCH, TAKER
     request_timeout: int = 10
+    target_risk_multipliers: dict[str, float] = None
+
+    def __post_init__(self):
+        if self.target_risk_multipliers is None:
+            self.target_risk_multipliers = {
+                "cz_binance": 1.25,
+                "elonmusk": 1.0,
+                "WhiteHouse": 0.8,
+                "realDonaldTrump": 0.6,
+            }
 
 
 @dataclass
@@ -48,15 +61,32 @@ class TradeCandidate:
     target_price: float
 
 
+def detect_handle_from_slug(slug: str) -> str:
+    """Infers target handle from event slug."""
+    slug_lower = slug.lower()
+    if "cz" in slug_lower or "binance" in slug_lower:
+        return "cz_binance"
+    if "trump" in slug_lower or "donald" in slug_lower:
+        return "realDonaldTrump"
+    if "white-house" in slug_lower or "whitehouse" in slug_lower:
+        return "WhiteHouse"
+    return "elonmusk"
+
+
 def candidates_from_scan_results(
     scan_results: list[tuple[ScannedTweetEvent, Optional[TrackingProgress], list[BracketEvaluation]]],
     min_edge: float = 0.04,
+    min_entry_price: float = 0.10,
+    max_entry_price: float = 0.65,
+    top_k_per_event: int = 1,
 ) -> list[TradeCandidate]:
-    """Converts scanner output tuples into structured TradeCandidate items."""
-    candidates: list[TradeCandidate] = []
+    """Converts scanner output tuples into structured TradeCandidate items,
+    filtered by the entry price safety corridor (0.10 <= px <= 0.65) and
+    restricted to top_k_per_event (mutual exclusivity).
+    """
+    candidates_by_event: dict[str, list[TradeCandidate]] = {}
 
     for ev, _, evals in scan_results:
-        # Build market lookup by slug and question
         market_by_slug: dict[str, dict[str, Any]] = {}
         market_by_q: dict[str, dict[str, Any]] = {}
         for m in ev.markets:
@@ -64,6 +94,9 @@ def candidates_from_scan_results(
                 market_by_slug[m["slug"]] = m
             if m.get("question"):
                 market_by_q[m["question"]] = m
+
+        if ev.event_id not in candidates_by_event:
+            candidates_by_event[ev.event_id] = []
 
         for b_eval in evals:
             edge = b_eval.edge_maker or b_eval.edge_buy or 0.0
@@ -96,9 +129,14 @@ def candidates_from_scan_results(
                 or b_eval.market_ask
                 or round(b_eval.fair_prob - edge, 3)
             )
+
+            # Safety corridor filter: reject deep OTM (< 0.10) and low-payoff deep ITM (> 0.65)
+            if not (min_entry_price <= target_px <= max_entry_price):
+                continue
+
             mkt_prob = b_eval.market_ask or b_eval.market_bid or target_px
 
-            candidates.append(
+            candidates_by_event[ev.event_id].append(
                 TradeCandidate(
                     event_id=ev.event_id,
                     event_slug=ev.slug,
@@ -115,7 +153,13 @@ def candidates_from_scan_results(
                 )
             )
 
-    return candidates
+    # For each event, select top_k_per_event (sorted by net_edge desc, model_prob desc)
+    selected_candidates: list[TradeCandidate] = []
+    for ev_id, cands in candidates_by_event.items():
+        cands.sort(key=lambda c: (c.net_edge, c.model_prob), reverse=True)
+        selected_candidates.extend(cands[:top_k_per_event])
+
+    return selected_candidates
 
 
 class ShadowEngine:
@@ -150,34 +194,30 @@ class ShadowEngine:
             if cand.side not in ("BUY_YES", "BUY_NO"):
                 continue
 
+            # Safety corridor filter check
+            limit_price = round(cand.target_price, 3)
+            if not (self.config.min_entry_price <= limit_price <= self.config.max_entry_price):
+                continue
+
             # Check if order already open or filled for this market
             if self.storage.has_active_order_for_bracket(cand.market_id, cand.side):
                 continue
 
-            # Check Event-Level portfolio risk cap
-            if cand.event_id not in event_committed_risk:
-                event_committed_risk[cand.event_id] = self.storage.get_active_risk_for_event(cand.event_id)
-
-            current_event_risk = event_committed_risk[cand.event_id]
-            if current_event_risk >= self.config.max_event_risk_usdc:
+            # Mutual Exclusivity: skip if this event already has ANY active order or was chosen in this cycle
+            if cand.event_id in event_committed_risk:
+                continue
+            if self.storage.has_active_order_for_event(cand.event_id):
                 continue
 
-            budget_left = self.config.max_event_risk_usdc - current_event_risk
+            # Dynamic target risk scaling
+            handle = detect_handle_from_slug(cand.event_slug)
+            mult = self.config.target_risk_multipliers.get(handle, 1.0)
 
-            # Sizing based on Quarter-Kelly
-            risk_usdc = available_cash * max(0.01, cand.kelly_fraction)
-            risk_usdc = min(risk_usdc, self.config.max_bracket_risk_usdc)
+            # Sizing based on Quarter-Kelly with target multiplier
+            risk_usdc = available_cash * max(0.01, cand.kelly_fraction) * mult
+            risk_usdc = min(risk_usdc, self.config.max_bracket_risk_usdc * mult)
+            risk_usdc = min(risk_usdc, self.config.max_event_risk_usdc)
 
-            # Deep OTM risk clamp: prevent huge dollar bets on tiny penny probabilities
-            limit_price = round(cand.target_price, 3)
-            if limit_price <= 0.01 or limit_price >= 0.99:
-                continue
-
-            if limit_price < self.config.otm_threshold:
-                risk_usdc = min(risk_usdc, self.config.max_otm_risk_usdc)
-
-            # Cap by event budget
-            risk_usdc = min(risk_usdc, budget_left)
             if risk_usdc < self.config.min_bracket_risk_usdc:
                 continue
 
@@ -214,9 +254,20 @@ class ShadowEngine:
             if self.storage.create_order(order):
                 placed_orders.append(order)
                 available_cash -= actual_cost
-                event_committed_risk[cand.event_id] = current_event_risk + actual_cost
+                event_committed_risk[cand.event_id] = actual_cost
 
         return placed_orders
+
+    def cancel_stale_orders(self, max_age_hours: Optional[float] = None) -> list[ShadowOrder]:
+        """Cancels open resting limit orders that exceed max_age_hours without fills."""
+        limit_hours = max_age_hours if max_age_hours is not None else self.config.max_stale_order_hours
+        stale_orders = self.storage.get_stale_open_orders(max_age_hours=limit_hours)
+        cancelled: list[ShadowOrder] = []
+        for o in stale_orders:
+            if self.storage.cancel_order(o.order_id):
+                o.status = "CANCELED"
+                cancelled.append(o)
+        return cancelled
 
     def check_and_update_fills(self) -> list[ShadowOrder]:
         """Checks real-time market tape & orderbooks to simulate realistic order fills."""

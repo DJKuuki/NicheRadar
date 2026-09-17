@@ -104,33 +104,12 @@ def run_one_cycle(
     scanner: TweetMarketScanner,
     handles: list[str] | None = None,
     min_edge: float = 0.05,
+    min_price: float = 0.10,
+    max_price: float = 0.65,
+    max_tenor_days: float = 8.0,
+    max_stale_hours: float = 12.0,
 ) -> None:
-    target_names = ", ".join(handles) if handles else "default targets"
-    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] Scanning Polymarket Social Markets for: {target_names}...")
-    scan_results = scanner.scan_and_evaluate(handles=handles)
-    candidates = candidates_from_scan_results(scan_results, min_edge=min_edge)
-    print(f"Found {len(candidates)} trade candidates with positive edge >= {min_edge:.1%}.")
-
-    # 1. Place orders
-    new_orders = engine.evaluate_and_place_orders(candidates)
-    if new_orders:
-        print(f"Placed {len(new_orders)} new shadow limit orders:")
-        for o in new_orders:
-            print(f"  + [{o.side}] {o.event_slug} ({o.bracket_name}) @ {o.limit_price:.3f}, {o.size_shares} shares (${o.cost_usdc:.2f})")
-    else:
-        print("No new orders placed (either no edge, below min size, or already active).")
-
-    # 2. Check fills
-    print("Checking fill conditions against Polymarket orderbooks & trades...")
-    fills = engine.check_and_update_fills()
-    if fills:
-        print(f"🎉 {len(fills)} orders FILLED:")
-        for f in fills:
-            print(f"  * FILLED: {f.order_id} ({f.bracket_name}) @ {f.fill_price:.3f}")
-    else:
-        print("No new fills triggered.")
-
-    # 3. Check settlements
+    # 1. Sync settlements first (releases cash & margin from resolved events)
     print("Syncing market settlements from Gamma API...")
     settlements = monitor.check_and_sync_settlements()
     if settlements:
@@ -139,6 +118,48 @@ def run_one_cycle(
             print(f"  * SETTLED: {s.order_id} ({s.bracket_name}) -> Terminal: {s.terminal_price:.1f}, PnL: ${s.realized_pnl:+.2f}")
     else:
         print("No new market resolutions.")
+
+    # 2. Cancel stale resting limit orders (releases cash, prevents adverse selection)
+    print("Checking and canceling stale resting limit orders...")
+    stale_cancelled = engine.cancel_stale_orders(max_age_hours=max_stale_hours)
+    if stale_cancelled:
+        print(f"🧹 Canceled {len(stale_cancelled)} stale resting limit orders (margin refunded to cash):")
+        for sc in stale_cancelled:
+            print(f"  - CANCELED: {sc.order_id} ({sc.bracket_name}) @ {sc.limit_price:.3f}, refunded ${sc.cost_usdc:.2f}")
+    else:
+        print("No stale resting orders found.")
+
+    # 3. Scan markets with tenor filtering
+    target_names = ", ".join(handles) if handles else "default targets"
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] Scanning Polymarket Social Markets (tenor <= {max_tenor_days:.1f}d) for: {target_names}...")
+    scan_results = scanner.scan_and_evaluate(handles=handles, max_tenor_days=max_tenor_days)
+    candidates = candidates_from_scan_results(
+        scan_results,
+        min_edge=min_edge,
+        min_entry_price=min_price,
+        max_entry_price=max_price,
+        top_k_per_event=1,
+    )
+    print(f"Found {len(candidates)} trade candidates (safety corridor {min_price:.2f}-{max_price:.2f}, Top-1 per event, edge >= {min_edge:.1%}).")
+
+    # 4. Place orders subject to Top-1 mutual exclusivity
+    new_orders = engine.evaluate_and_place_orders(candidates)
+    if new_orders:
+        print(f"Placed {len(new_orders)} new shadow limit orders:")
+        for o in new_orders:
+            print(f"  + [{o.side}] {o.event_slug} ({o.bracket_name}) @ {o.limit_price:.3f}, {o.size_shares} shares (${o.cost_usdc:.2f})")
+    else:
+        print("No new orders placed (either no edge, below min size, or already active).")
+
+    # 5. Check fills
+    print("Checking fill conditions against Polymarket orderbooks & trades...")
+    fills = engine.check_and_update_fills()
+    if fills:
+        print(f"🎉 {len(fills)} orders FILLED:")
+        for f in fills:
+            print(f"  * FILLED: {f.order_id} ({f.bracket_name}) @ {f.fill_price:.3f}")
+    else:
+        print("No new fills triggered.")
 
 
 def main() -> None:
@@ -152,6 +173,10 @@ def main() -> None:
     parser.add_argument("--fill-interval", type=int, default=30, help="Seconds between fill checks (daemon mode)")
     parser.add_argument("--settle-interval", type=int, default=300, help="Seconds between settlement syncs (daemon mode)")
     parser.add_argument("--min-edge", type=float, default=0.05, help="Minimum net edge required to place orders")
+    parser.add_argument("--min-price", type=float, default=0.10, help="Minimum entry price (safety corridor, default 0.10)")
+    parser.add_argument("--max-price", type=float, default=0.65, help="Maximum entry price (safety corridor, default 0.65)")
+    parser.add_argument("--max-tenor-days", type=float, default=8.0, help="Maximum market tenor in days (default 8.0)")
+    parser.add_argument("--stale-hours", type=float, default=12.0, help="Hours before an unfilled resting order is canceled (default 12.0)")
     parser.add_argument("--fill-mode", default="MAKER_STRICT", choices=["MAKER_STRICT", "MAKER_TOUCH", "TAKER"], help="Fill simulation realism mode")
     parser.add_argument(
         "--handles",
@@ -177,11 +202,28 @@ def main() -> None:
 
     xtracker = XTrackerClient()
     scanner = TweetMarketScanner(xtracker_client=xtracker)
-    cfg = EngineConfig(min_edge=args.min_edge, default_fill_mode=args.fill_mode)
+    cfg = EngineConfig(
+        min_edge=args.min_edge,
+        min_entry_price=args.min_price,
+        max_entry_price=args.max_price,
+        max_stale_order_hours=args.stale_hours,
+        default_fill_mode=args.fill_mode,
+    )
     engine = ShadowEngine(storage=storage, config=cfg)
 
     if args.once or not args.daemon:
-        run_one_cycle(storage, engine, monitor, scanner, handles=args.handles, min_edge=args.min_edge)
+        run_one_cycle(
+            storage,
+            engine,
+            monitor,
+            scanner,
+            handles=args.handles,
+            min_edge=args.min_edge,
+            min_price=args.min_price,
+            max_price=args.max_price,
+            max_tenor_days=args.max_tenor_days,
+            max_stale_hours=args.stale_hours,
+        )
         print_report(storage)
         return
 
@@ -199,8 +241,19 @@ def main() -> None:
             if now - last_scan >= args.scan_interval:
                 print(f"\n--- [CYCLE SCAN] {datetime.now(timezone.utc).isoformat()} ---")
                 try:
-                    scan_results = scanner.scan_and_evaluate(handles=args.handles)
-                    candidates = candidates_from_scan_results(scan_results, min_edge=args.min_edge)
+                    # Cancel stale orders before scan to release cash
+                    stale = engine.cancel_stale_orders(max_age_hours=args.stale_hours)
+                    if stale:
+                        print(f"🧹 Canceled {len(stale)} stale resting limit orders (margin refunded to cash).")
+
+                    scan_results = scanner.scan_and_evaluate(handles=args.handles, max_tenor_days=args.max_tenor_days)
+                    candidates = candidates_from_scan_results(
+                        scan_results,
+                        min_edge=args.min_edge,
+                        min_entry_price=args.min_price,
+                        max_entry_price=args.max_price,
+                        top_k_per_event=1,
+                    )
                     new_orders = engine.evaluate_and_place_orders(candidates)
                     if new_orders:
                         print(f"Placed {len(new_orders)} new shadow orders.")

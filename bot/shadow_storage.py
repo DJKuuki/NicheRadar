@@ -178,6 +178,19 @@ class ShadowStorage:
             ).fetchone()
             return row is not None
 
+    def has_active_order_for_event(self, event_id: str) -> bool:
+        """Returns True if there is already an OPEN or FILLED order for this entire event."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM shadow_orders
+                WHERE event_id = ? AND status IN ('OPEN', 'FILLED')
+                LIMIT 1
+                """,
+                (event_id,),
+            ).fetchone()
+            return row is not None
+
     def get_active_risk_for_event(self, event_id: str) -> float:
         """Returns total cost_usdc of all OPEN and FILLED orders for an event."""
         with closing(self._connect()) as conn:
@@ -258,6 +271,21 @@ class ShadowStorage:
         with closing(self._connect()) as conn:
             rows = conn.execute("SELECT * FROM shadow_orders WHERE status = 'OPEN'").fetchall()
             return [self._row_to_order(r) for r in rows]
+
+    def get_stale_open_orders(self, max_age_hours: float = 12.0) -> list[ShadowOrder]:
+        """Returns open orders whose placed_at_utc is older than max_age_hours."""
+        open_orders = self.get_open_orders()
+        stale = []
+        now = datetime.now(timezone.utc)
+        for o in open_orders:
+            try:
+                placed_dt = datetime.fromisoformat(o.placed_at_utc.replace("Z", "+00:00"))
+                age_hours = (now - placed_dt).total_seconds() / 3600.0
+                if age_hours >= max_age_hours:
+                    stale.append(o)
+            except Exception:
+                pass
+        return stale
 
     def get_filled_orders(self) -> list[ShadowOrder]:
         with closing(self._connect()) as conn:
