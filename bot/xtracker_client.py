@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import math
 from typing import Any
 
 import requests
@@ -40,6 +41,7 @@ class TrackingProgress:
     remaining_hours: float
     percent_time_elapsed: float
     pace_per_day: float
+    observed_at_utc: str | None = None
 
 
 class XTrackerClient:
@@ -99,7 +101,7 @@ class XTrackerClient:
             self._user_info_cache[handle] = (now, data)
             return data
         except Exception as exc:
-            if handle in self._user_info_cache:
+            if handle in self._user_info_cache and now - self._user_info_cache[handle][0] < ttl_sec:
                 logger.warning("Using stale cached user info for %s after error: %s", handle, exc)
                 return self._user_info_cache[handle][1]
             raise exc
@@ -119,7 +121,7 @@ class XTrackerClient:
             self._user_metrics_cache[user_id] = (now, data)
             return data
         except Exception as exc:
-            if user_id in self._user_metrics_cache:
+            if user_id in self._user_metrics_cache and now - self._user_metrics_cache[user_id][0] < ttl_sec:
                 logger.warning("Using stale cached metrics for %s after error: %s", user_id, exc)
                 return self._user_metrics_cache[user_id][1]
             raise exc
@@ -163,24 +165,27 @@ class XTrackerClient:
         if now is None:
             now = datetime.now(timezone.utc)
 
-        metrics = self.get_user_metrics(user_id)
-        matching_items = [
-            m for m in metrics if m.get("data", {}).get("trackingId") == tracking_id
-        ]
-        if matching_items:
-            matching_items.sort(key=lambda x: x.get("date", ""))
-            latest = matching_items[-1]
-            cum = latest.get("data", {}).get("cumulative")
-            count = latest.get("data", {}).get("count", 0)
-            current_count = int(cum) if cum is not None and cum > 0 else int(count)
-        else:
-            current_count = 0
+        # Daily metrics are historical aggregates, not a live tracking counter.
+        detail = self._get_json_with_retry(
+            f"{self.base_url}/trackings/{tracking_id}?includeStats=true"
+        ).get("data", {})
+        if detail.get("id") != tracking_id or detail.get("userId") != user_id:
+            raise ValueError("Tracking response identity mismatch")
+        synced = self._parse_iso(detail.get("user", {}).get("lastSync"))
+        if synced is None or not -60 <= (now - synced).total_seconds() <= 900:
+            raise ValueError("Missing or stale live tracking data")
+        count = detail.get("stats", {}).get("total")
+        if isinstance(count, bool) or not isinstance(count, (int, float)) or not math.isfinite(count) or count < 0 or int(count) != count:
+            raise ValueError("Missing or invalid tracking total")
+        current_count = int(count)
 
         start = target_tracking.start_date
         end = target_tracking.end_date
-        total_seconds = max(1.0, (end - start).total_seconds())
+        if end <= start or (now < start and current_count != 0):
+            raise ValueError("Invalid tracking window or pre-window count")
+        total_seconds = (end - start).total_seconds()
         elapsed_seconds = max(0.0, min(total_seconds, (now - start).total_seconds()))
-        remaining_seconds = max(0.0, (end - now).total_seconds())
+        remaining_seconds = max(0.0, (end - max(now, start)).total_seconds())
 
         total_hours = total_seconds / 3600.0
         elapsed_hours = elapsed_seconds / 3600.0
@@ -197,6 +202,7 @@ class XTrackerClient:
             remaining_hours=remaining_hours,
             percent_time_elapsed=percent_elapsed,
             pace_per_day=pace_per_day,
+            observed_at_utc=synced.isoformat(),
         )
 
     def calculate_historical_daily_stats(
@@ -212,17 +218,24 @@ class XTrackerClient:
 
         metrics = self.get_user_metrics(user_id)
         # Sort by date descending
+        today = datetime.now(timezone.utc).date()
+        cutoff = today - timedelta(days=lookback_days)
         daily_items = [m for m in metrics if m.get("type") == "daily"]
         daily_items.sort(key=lambda x: x.get("date", ""), reverse=True)
 
         counts = []
-        for m in daily_items[:lookback_days]:
+        seen_days = set()
+        for m in daily_items:
+            stamp = self._parse_iso(m.get("date"))
+            if stamp is None or not cutoff <= stamp.date() < today or stamp.date() in seen_days:
+                continue
             c = m.get("data", {}).get("count")
-            if c is not None and isinstance(c, (int, float)):
+            if not isinstance(c, bool) and isinstance(c, (int, float)) and math.isfinite(c) and c >= 0 and int(c) == c:
                 counts.append(int(c))
+                seen_days.add(stamp.date())
 
-        if not counts:
-            return 30.0, 100.0, []  # default fallback
+        if len(counts) < 20:
+            raise ValueError("At least 20 complete daily observations required")
 
         n = len(counts)
         mean_c = sum(counts) / n

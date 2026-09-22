@@ -5,7 +5,7 @@ and statistical performance analytics using isolated temporary databases.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pytest
 
 from bot.performance_analytics import PerformanceAnalytics
@@ -150,7 +150,7 @@ def test_shadow_engine_order_placement_and_fill_simulation(temp_storage):
     # Mock orderbook: best ask is 0.19 (seller matches our 0.20 bid)
     mock_book = {
         "bids": [{"price": "0.18", "size": "50"}],
-        "asks": [{"price": "0.19", "size": "100"}],
+        "asks": [{"price": "0.19", "size": "300"}],
     }
 
     engine = ShadowEngine(
@@ -185,7 +185,7 @@ def test_shadow_engine_trades_tape_fill_simulation(temp_storage):
         limit_price=0.25,
         size_shares=50.0,
         cost_usdc=12.5,
-        placed_at_utc=datetime.now(timezone.utc).isoformat(),
+        placed_at_utc=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
         status="OPEN",
         fill_mode="MAKER_STRICT",
     )
@@ -194,7 +194,7 @@ def test_shadow_engine_trades_tape_fill_simulation(temp_storage):
     # Orderbook ask is high (0.30), but Data API shows someone traded at 0.24 (trade-through!)
     mock_book = {"asks": [{"price": "0.30", "size": "50"}]}
     mock_trades = [
-        {"price": 0.24, "size": 100.0, "asset": "tok_strict", "timestamp": 1788880000}
+        {"price": 0.24, "size": 100.0, "asset": "tok_strict", "timestamp": int(datetime.now(timezone.utc).timestamp()), "side": "SELL"}
     ]
 
     engine = ShadowEngine(

@@ -292,7 +292,7 @@ class ShadowStorage:
             rows = conn.execute("SELECT * FROM shadow_orders WHERE status = 'FILLED'").fetchall()
             return [self._row_to_order(r) for r in rows]
 
-    def get_all_orders(self, limit: int = 100) -> list[ShadowOrder]:
+    def get_all_orders(self, limit: int = -1) -> list[ShadowOrder]:
         with closing(self._connect()) as conn:
             rows = conn.execute(
                 "SELECT * FROM shadow_orders ORDER BY placed_at_utc DESC LIMIT ?",
@@ -309,16 +309,26 @@ class ShadowStorage:
         """Transitions order from OPEN to FILLED."""
         now = filled_at_utc or datetime.now(timezone.utc).isoformat()
         with closing(self._connect()) as conn:
-            cur = conn.execute(
-                """
-                UPDATE shadow_orders
-                SET status = 'FILLED', fill_price = ?, filled_at_utc = ?
-                WHERE order_id = ? AND status = 'OPEN'
-                """,
-                (fill_price, now, order_id),
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM shadow_orders WHERE order_id = ? AND status = 'OPEN'", (order_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            if not 0 < fill_price <= float(row["limit_price"]):
+                raise ValueError("Fill must be positive and at or below buy limit")
+            cost = round(fill_price * float(row["size_shares"]), 4)
+            refund = float(row["cost_usdc"]) - cost
+            conn.execute(
+                "UPDATE shadow_account SET cash_balance = cash_balance + ?, locked_collateral = locked_collateral - ?, updated_at_utc = ? WHERE id = 1",
+                (refund, refund, now),
+            )
+            conn.execute(
+                "UPDATE shadow_orders SET status = 'FILLED', fill_price = ?, cost_usdc = ?, filled_at_utc = ? WHERE order_id = ?",
+                (fill_price, cost, now, order_id),
             )
             conn.commit()
-            return cur.rowcount > 0
+            return True
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancels an OPEN order and refunds the locked collateral."""

@@ -7,10 +7,11 @@ and Data API trades, preventing optimistic cherry-picking.
 from __future__ import annotations
 
 import json
+import math
 import time
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -59,6 +60,7 @@ class TradeCandidate:
     net_edge: float
     kelly_fraction: float
     target_price: float
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def detect_handle_from_slug(slug: str) -> str:
@@ -99,8 +101,8 @@ def candidates_from_scan_results(
             candidates_by_event[ev.event_id] = []
 
         for b_eval in evals:
-            edge = b_eval.edge_maker or b_eval.edge_buy or 0.0
-            if edge < min_edge or b_eval.recommendation == "HOLD":
+            edge = b_eval.edge_maker if b_eval.edge_maker is not None else 0.0
+            if edge < min_edge or b_eval.recommendation not in ("MAKER_BUY", "MAKER_BUY_YES"):
                 continue
 
             # Find market dict
@@ -142,14 +144,15 @@ def candidates_from_scan_results(
                     event_slug=ev.slug,
                     market_id=market_id,
                     condition_id=condition_id,
-                    clob_token_id=clob_token_id,
+                    clob_token_id=m.get("_yes_token_id", clob_token_id),
                     bracket_name=b_eval.bracket.name,
                     side="BUY_YES",
                     model_prob=round(b_eval.fair_prob, 4),
                     market_prob=round(mkt_prob, 4),
                     net_edge=round(edge, 4),
                     kelly_fraction=round(b_eval.kelly_fraction or 0.05, 4),
-                    target_price=round(target_px, 3),
+                    target_price=round(target_px, 6),
+                    metadata=m.get("_model_context", {}),
                 )
             )
 
@@ -175,6 +178,31 @@ class ShadowEngine:
         self._custom_book_fetcher = book_fetcher
         self._custom_trades_fetcher = trades_fetcher
 
+    def liquidation_values(self) -> dict[str, float]:
+        """Gross sale proceeds at current bid depth; omit unpriceable positions."""
+        values = {}
+        for order in self.storage.get_filled_orders():
+            book = self._fetch_book(order.token_id)
+            if not book:
+                continue
+            levels = []
+            for level in book.get("bids", []):
+                try:
+                    price, size = float(level["price"]), float(level["size"])
+                except (ValueError, TypeError, KeyError):
+                    continue
+                if math.isfinite(price) and math.isfinite(size) and 0 < price <= 1 and size > 0:
+                    levels.append((price, size))
+            remaining, proceeds = order.size_shares, 0.0
+            for price, size in sorted(levels, reverse=True):
+                take = min(remaining, size)
+                proceeds += take * price
+                remaining -= take
+                if remaining <= 1e-9:
+                    values[order.order_id] = proceeds
+                    break
+        return values
+
     def evaluate_and_place_orders(
         self,
         candidates: list[TradeCandidate],
@@ -188,6 +216,16 @@ class ShadowEngine:
         event_committed_risk: dict[str, float] = {}
 
         for cand in candidates:
+            if cand.metadata:
+                try:
+                    now = datetime.now(timezone.utc)
+                    quote_at = datetime.fromisoformat(cand.metadata["quote_at"])
+                    end = datetime.fromisoformat(cand.metadata["window_end"])
+                    observed = datetime.fromisoformat(cand.metadata["count_observed_at"])
+                    if not 0 <= (now - quote_at).total_seconds() <= 300 or now >= end or not -60 <= (now - observed).total_seconds() <= 900:
+                        continue
+                except (KeyError, TypeError, ValueError):
+                    continue
             if cand.net_edge < self.config.min_edge:
                 continue
 
@@ -195,7 +233,7 @@ class ShadowEngine:
                 continue
 
             # Safety corridor filter check
-            limit_price = round(cand.target_price, 3)
+            limit_price = round(cand.target_price, 6)
             if not (self.config.min_entry_price <= limit_price <= self.config.max_entry_price):
                 continue
 
@@ -221,7 +259,7 @@ class ShadowEngine:
             if risk_usdc < self.config.min_bracket_risk_usdc:
                 continue
 
-            shares = round(risk_usdc / limit_price, 2)
+            shares = math.floor(risk_usdc / limit_price * 100) / 100
             actual_cost = round(shares * limit_price, 4)
             if actual_cost > available_cash:
                 continue
@@ -243,6 +281,8 @@ class ShadowEngine:
                 fill_mode=self.config.default_fill_mode,
                 metadata_json=json.dumps(
                     {
+                        **cand.metadata,
+                        "strategy_version": "v3-data-integrity",
                         "model_prob": cand.model_prob,
                         "market_prob": cand.market_prob,
                         "net_edge": cand.net_edge,
@@ -257,6 +297,13 @@ class ShadowEngine:
                 event_committed_risk[cand.event_id] = actual_cost
 
         return placed_orders
+
+    def revalidate_open_orders(self, candidates: list[TradeCandidate]) -> None:
+        by_market = {(c.market_id, c.side): c for c in candidates}
+        for order in self.storage.get_open_orders():
+            candidate = by_market.get((order.market_id, order.side))
+            if candidate is None or candidate.model_prob - order.limit_price < self.config.min_edge or order.limit_price > candidate.target_price:
+                self.storage.cancel_order(order.order_id)
 
     def cancel_stale_orders(self, max_age_hours: Optional[float] = None) -> list[ShadowOrder]:
         """Cancels open resting limit orders that exceed max_age_hours without fills."""
@@ -281,51 +328,71 @@ class ShadowEngine:
             filled = False
             fill_price = order.limit_price
 
-            # 1. Check orderbook
+            # Enforce TTL even between scans. Never fill an expired quote.
+            placed_at = datetime.fromisoformat(order.placed_at_utc.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            if (now - placed_at).total_seconds() >= self.config.max_stale_order_hours * 3600:
+                self.storage.cancel_order(order.order_id)
+                continue
+
+            # A full fill requires enough executable depth, not just a price touch.
             book = self._fetch_book(order.token_id)
             if book:
-                asks = book.get("asks", [])
-                if asks:
-                    best_ask = min(float(a["price"]) for a in asks if "price" in a)
-                    # If best ask is at or below our limit, an incoming seller matches or crossed our bid
-                    if best_ask <= order.limit_price:
+                levels = []
+                for level in book.get("asks", []):
+                    try:
+                        price, size = float(level["price"]), float(level["size"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if math.isfinite(price) and math.isfinite(size) and 0 < price <= order.limit_price and size > 0:
+                        levels.append((price, size))
+                remaining, cost = order.size_shares, 0.0
+                for price, size in sorted(levels):
+                    take = min(remaining, size)
+                    cost += take * price
+                    remaining -= take
+                    if remaining <= 1e-9:
                         filled = True
                         if order.fill_mode == "TAKER":
-                            fill_price = best_ask
-                        else:
-                            fill_price = order.limit_price
+                            fill_price = cost / order.size_shares
+                        break
 
-            # 2. If not filled via book, check real Data API trades tape
             if not filled and order.condition_id and order.fill_mode in ("MAKER_STRICT", "MAKER_TOUCH"):
-                trades = self._fetch_trades(order.condition_id)
-                if trades:
-                    # Look for trades matching our token and price criteria
-                    for t in trades:
-                        t_price = float(t.get("price") or 0.0)
-                        t_size = float(t.get("size") or 0.0)
-                        t_asset = str(t.get("asset") or "")
-
-                        if t_asset and t_asset != order.token_id:
-                            continue
-
-                        # Check if trade occurred at or below our limit
-                        if order.fill_mode == "MAKER_STRICT":
-                            # Strict trade through: market traded strictly below our limit, or traded at limit with sufficient volume
-                            if t_price < order.limit_price or (t_price <= order.limit_price and t_size >= order.size_shares):
-                                filled = True
-                                fill_price = order.limit_price
-                                break
-                        elif order.fill_mode == "MAKER_TOUCH":
-                            # Touch: any print at or below our limit
-                            if t_price <= order.limit_price:
-                                filled = True
-                                fill_price = order.limit_price
-                                break
+                trades = self._fetch_trades(order.condition_id) or []
+                # Do not accumulate repeated API responses across polls. Strict mode
+                # requires sell volume through our bid; at-price queue rank is unknown.
+                volume = 0.0
+                seen = set()
+                for trade in trades:
+                    try:
+                        stamp = float(trade["timestamp"])
+                        price, size = float(trade["price"]), float(trade["size"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if stamp > 1e12:
+                        stamp /= 1000.0
+                    if not all(math.isfinite(x) for x in (stamp, price, size)):
+                        continue
+                    if not placed_at.timestamp() < stamp <= now.timestamp():
+                        continue
+                    if str(trade.get("asset", "")) != order.token_id or str(trade.get("side", "")).upper() != "SELL":
+                        continue
+                    if not 0 < price <= order.limit_price or size <= 0:
+                        continue
+                    if order.fill_mode == "MAKER_STRICT" and price >= order.limit_price:
+                        continue
+                    key = (trade.get("transactionHash"), stamp, price, size, order.token_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    volume += size
+                filled = volume >= order.size_shares
 
             if filled:
                 if self.storage.mark_order_filled(order.order_id, fill_price=fill_price):
                     order.status = "FILLED"
                     order.fill_price = fill_price
+                    order.cost_usdc = round(fill_price * order.size_shares, 4)
                     filled_orders.append(order)
 
         return filled_orders

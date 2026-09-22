@@ -85,8 +85,7 @@ class SettlementMonitor:
 
     def _check_market_resolution(self, market_data: dict[str, Any]) -> Optional[dict[str, Any]]:
         """Determines if a market is officially resolved."""
-        closed = bool(market_data.get("closed"))
-        resolved = bool(market_data.get("resolved")) or (market_data.get("umaResolutionStatus") == "resolved")
+        resolved = market_data.get("resolved") is True or (market_data.get("umaResolutionStatus") == "resolved")
 
         raw_prices = market_data.get("outcomePrices")
         if isinstance(raw_prices, str):
@@ -95,7 +94,10 @@ class SettlementMonitor:
             except Exception:
                 prices = []
         elif isinstance(raw_prices, list):
-            prices = [float(p) for p in raw_prices]
+            try:
+                prices = [float(p) for p in raw_prices]
+            except (ValueError, TypeError):
+                return None
         else:
             prices = []
 
@@ -103,18 +105,24 @@ class SettlementMonitor:
             return None
 
         # Check terminal prices
-        yes_price = prices[0]
-        no_price = prices[1]
+        outcomes = market_data.get("outcomes", ["Yes", "No"])
+        try:
+            outcomes = json.loads(outcomes) if isinstance(outcomes, str) else outcomes
+            labels = [str(x).lower() for x in outcomes]
+            yes_price = prices[labels.index("yes")]
+            no_price = prices[labels.index("no")]
+        except (ValueError, TypeError, IndexError):
+            return None
 
-        # Must be officially closed or resolved by Polymarket
-        if not (closed or resolved):
+        # Closed trading and near-terminal quotes are not final resolution.
+        if not resolved:
             return None
 
         # Resolution criteria:
-        # Market is closed/resolved AND outcome prices are terminal (>= 0.90 vs <= 0.10)
-        if yes_price >= 0.90 and no_price <= 0.10:
+        # Official resolution AND exact binary payoff.
+        if yes_price == 1.0 and no_price == 0.0:
             return {"yes_won": True, "yes_price": yes_price, "no_price": no_price}
-        if no_price >= 0.90 and yes_price <= 0.10:
+        if no_price == 1.0 and yes_price == 0.0:
             return {"yes_won": False, "yes_price": yes_price, "no_price": no_price}
 
         return None

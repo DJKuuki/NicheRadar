@@ -83,9 +83,11 @@ class TweetProbabilityModel:
         remaining_hours: float,
         market_ask: float | None = None,
         market_bid: float | None = None,
+        tick_size: float = 0.01,
     ) -> BracketEvaluation:
         """Calculate the exact model probability and trading edge for a specific bracket."""
-        max_k = max(600, (bracket.high or 500) + 100)
+        # The CDF must include every term below an open bracket's threshold.
+        max_k = max(600, (bracket.high if bracket.high is not None else bracket.low) - current_count)
         pmf = self.forecast_pmf_remaining(remaining_hours, max_x=max_k)
 
         low = bracket.low
@@ -124,9 +126,11 @@ class TweetProbabilityModel:
 
         if market_bid is not None and 0.0 < market_bid < 1.0:
             # Maker price set 1 cent above bid, or inside spread
-            target_maker = round(market_bid + 0.01, 2)
+            if not math.isfinite(tick_size) or not 0 < tick_size < 1:
+                raise ValueError("Invalid price tick")
+            target_maker = round(market_bid + tick_size, 6)
             if market_ask is not None and target_maker >= market_ask:
-                target_maker = round(market_ask - 0.01, 2)
+                target_maker = round(market_ask - tick_size, 6)
             if target_maker is not None and target_maker > 0:
                 edge_maker = prob - target_maker
 

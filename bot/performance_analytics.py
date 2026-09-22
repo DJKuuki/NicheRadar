@@ -42,8 +42,10 @@ class PerformanceAnalytics:
     def __init__(self, storage: ShadowStorage) -> None:
         self.storage = storage
 
-    def evaluate(self) -> PerformanceMetrics:
-        all_orders = self.storage.get_all_orders(limit=1000)
+    def evaluate(self, strategy_version: str | None = None) -> PerformanceMetrics:
+        all_orders = self.storage.get_all_orders()
+        if strategy_version is not None:
+            all_orders = [o for o in all_orders if self.order_version(o) == strategy_version]
         account = self.storage.get_account_summary()
 
         total_orders = len(all_orders)
@@ -118,10 +120,15 @@ class PerformanceAnalytics:
         failed_gates: list[str] = []
 
         # Gate 1: Sample Size (N >= 20)
-        if settled_count >= 20:
-            passed_gates.append(f"Sample Size (N={settled_count} >= 20)")
+        event_count = len({o.event_id for o in settled_orders})
+        if event_count >= 20:
+            passed_gates.append(f"Distinct events (N={event_count} >= 20; overlapping windows may correlate)")
         else:
-            failed_gates.append(f"Sample Size (N={settled_count} < 20)")
+            failed_gates.append(f"Distinct events (N={event_count} < 20)")
+
+        versions = {self.order_version(o) for o in settled_orders}
+        if len(versions) > 1:
+            failed_gates.append("Mixed strategy versions; evaluate each version separately")
 
         # Gate 2: Net Realized Profit (> $0)
         if total_pnl > 0:
@@ -173,3 +180,10 @@ class PerformanceAnalytics:
             passed_gates=passed_gates,
             failed_gates=failed_gates,
         )
+
+    @staticmethod
+    def order_version(order: ShadowOrder) -> str:
+        try:
+            return json.loads(order.metadata_json).get("strategy_version", "legacy")
+        except (ValueError, TypeError, AttributeError):
+            return "legacy"

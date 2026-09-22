@@ -13,7 +13,7 @@ An industrial quantitative research and statistical arbitrage engine for **Polym
 Unlike high-frequency crypto price markets (e.g. BTC 5-minute Up/Down) that suffer from severe adverse selection by HFT bots, **Tweet Count Markets** are predominantly traded by emotional retail participants:
 1. **Misconception of Burst Probabilities**: Retail traders systematically overprice tail intervals and panic-buy low-probability high brackets when a minor burst of tweets occurs.
 2. **Deterministic Resolution Source**: Polymarket resolves these markets exclusively against its dedicated, official tracker: [`https://xtracker.polymarket.com`](https://xtracker.polymarket.com). This repo interfaces directly with the official public REST endpoints to obtain exact cumulative counts without third-party scraping risks.
-3. **Overdispersion Exploitation**: Social post arrival processes exhibit significant burstiness ($\sigma^2 / \mu \approx 9.3\times$). Simple Poisson distribution models underestimate tail variance. NicheRadar parameterizes continuous **Negative Binomial distributions** calibrated against 300+ days of historical post data.
+3. **Overdispersion Modeling**: NicheRadar fits a negative binomial count distribution using up to 90 completed calendar days. At least 20 daily observations are required. This is a forecasting assumption, not evidence of a profitable trading edge.
 
 ---
 
@@ -46,9 +46,9 @@ For an open-ended high bracket $[A, +]$:
 $$P(K + X_{rem} \ge A) = 1 - \sum_{x = 0}^{A - K - 1} P(X_{rem} = x)$$
 
 ### 3. Execution & Sizing
-* **Maker Edge**: $\text{Edge}_{maker} = P_{fair} - (\text{Market Bid} + 0.01)$
+* **Maker Edge**: Model probability minus a quote computed from the actual CLOB bid, ask, and tick size.
 * **Position Sizing**: Quarter-Kelly criterion ($f^* \times 0.25$) to conservatively manage drawdown risk.
-* **Fee Protection**: Defaulting to passive Maker quotes to completely bypass the 2% Taker fee penalty.
+* **Execution**: Defaults to simulated maker orders. Reported results exclude fees; paper fills do not reproduce exchange queue priority or guarantee live execution.
 
 ---
 
@@ -110,6 +110,26 @@ python scripts/run_shadow_trader.py --report
 ```bash
 python scripts/run_shadow_trader.py --daemon --scan-interval 60 --fill-interval 30
 ```
+
+### Data integrity version (`v3-data-integrity`)
+
+* Match XTracker by the exact event link and validate the ending timestamp. Gamma `startDate` is a listing date, not the counting-window start. Future windows use their full counting duration without adding time before the window opens.
+* Read the live tracking `stats.total`; reject missing/invalid counts or tracker synchronization older than 15 minutes. Missing historical data also disables signals instead of falling back to generic model parameters. Today's incomplete daily count is excluded.
+* Open-ended probabilities include the entire CDF below the threshold, including thresholds above 600.
+* Use real two-sided CLOB books. Orders record tracking identity, window, current count, model parameters, quotes, and strategy version. Scans cancel unsupported open orders; TTL is also checked before fills.
+* Full simulated fills require enough book depth or qualifying, timestamped sell volume after order placement. Strict tape fills require trading below the bid. Duplicate prints are not counted twice within a poll, and volume is not accumulated across polls. Partial fills and queue priority remain unmodeled; this intentionally conservative simulation may miss real fills.
+* Taker fills use depth-weighted prices and refund unused collateral. Settlement requires official resolution and exact binary terminal prices.
+* Reports separate legacy orders from new-version orders. The standard equity and drawdown figures are cost-based equity and realized-only drawdown. They are not a live liquidation valuation.
+
+To request a fresh gross liquidation estimate using current bid depth:
+
+```bash
+python scripts/run_shadow_trader.py --report --mark-to-market
+```
+
+If any position lacks sufficient bid depth, the report displays pricing coverage and the priced subset's PnL; it does not invent a complete market equity value. Fees are excluded.
+
+Existing settled records and filled positions are not rewritten by this upgrade. Restart an existing daemon to load the new code; on its next scan, unsupported resting orders are canceled. Statistical calibration, intraday/burst modeling, and out-of-sample profitability still require research: fixing data and execution errors does not establish an edge.
 
 ---
 

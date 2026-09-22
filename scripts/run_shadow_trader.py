@@ -31,7 +31,7 @@ from bot.tweet_market_scanner import TweetMarketScanner
 from bot.xtracker_client import XTrackerClient
 
 
-def print_report(storage: ShadowStorage) -> None:
+def print_report(storage: ShadowStorage, mark_to_market: bool = False) -> None:
     analytics = PerformanceAnalytics(storage)
     metrics = analytics.evaluate()
     account = storage.get_account_summary()
@@ -43,8 +43,20 @@ def print_report(storage: ShadowStorage) -> None:
     print(f" Initial Bankroll    : ${account.initial_bankroll:,.2f} USDC")
     print(f" Cash Balance        : ${account.cash_balance:,.2f} USDC")
     print(f" Locked Margin       : ${account.locked_collateral:,.2f} USDC")
-    print(f" Total Equity        : ${account.total_equity:,.2f} USDC")
+    print(f" Equity (at cost)    : ${account.total_equity:,.2f} USDC")
     print(f" Net Realized PnL    : ${metrics.total_realized_pnl:+,.2f} USDC")
+    if mark_to_market:
+        positions = storage.get_filled_orders()
+        values = ShadowEngine(storage).liquidation_values()
+        unrealized = sum(values[o.order_id] - o.cost_usdc for o in positions if o.order_id in values)
+        print(f" Bid-depth coverage : {len(values)}/{len(positions)} positions (before fees)")
+        if len(values) == len(positions):
+            print(f" Unrealized PnL      : ${unrealized:+,.2f}")
+            print(f" Equity (bid depth)  : ${account.total_equity + unrealized:,.2f}")
+        else:
+            print(f" Priced subset PnL   : ${unrealized:+,.2f}; total market equity unavailable")
+    else:
+        print(" Unrealized PnL      : Not valued; use --report --mark-to-market")
     print("-" * 70)
     print(f" Total Orders Placed : {metrics.total_orders_placed}")
     print(f" Resting Limit (OPEN): {metrics.open_orders_count}")
@@ -53,7 +65,7 @@ def print_report(storage: ShadowStorage) -> None:
     print(f" Execution Fill Rate : {metrics.fill_rate_pct:.1f}%")
     print(f" Win Rate            : {metrics.win_rate_pct:.1f}% ({metrics.winning_trades}W / {metrics.losing_trades}L)")
     print(f" Profit Factor       : {metrics.profit_factor if metrics.profit_factor is not None else 'N/A'}")
-    print(f" Max Drawdown        : ${metrics.max_drawdown_usdc:,.2f} ({metrics.max_drawdown_pct:.1f}%)")
+    print(f" Realized Drawdown   : ${metrics.max_drawdown_usdc:,.2f} ({metrics.max_drawdown_pct:.1f}%)")
     print("-" * 70)
     print(" 📊 PROBABILITY CALIBRATION (Brier Score)")
     if metrics.model_brier_score is not None:
@@ -69,6 +81,13 @@ def print_report(storage: ShadowStorage) -> None:
     for gate in metrics.failed_gates:
         print(f"   [FAIL] {gate}")
     print("=" * 70 + "\n")
+    versions = sorted({analytics.order_version(o) for o in storage.get_all_orders()})
+    for version in versions:
+        cohort = analytics.evaluate(strategy_version=version)
+        print(f" Strategy {version}: {cohort.settled_trades_count} settled, "
+              f"{cohort.winning_trades}W/{cohort.losing_trades}L, "
+              f"realized ${cohort.total_realized_pnl:+.2f}, "
+              f"{cohort.filled_positions_count} awaiting settlement")
 
     # Show recent active orders
     open_orders = storage.get_open_orders()
@@ -143,6 +162,7 @@ def run_one_cycle(
     print(f"Found {len(candidates)} trade candidates (safety corridor {min_price:.2f}-{max_price:.2f}, Top-1 per event, edge >= {min_edge:.1%}).")
 
     # 4. Place orders subject to Top-1 mutual exclusivity
+    engine.revalidate_open_orders(candidates)
     new_orders = engine.evaluate_and_place_orders(candidates)
     if new_orders:
         print(f"Placed {len(new_orders)} new shadow limit orders:")
@@ -167,6 +187,7 @@ def main() -> None:
     parser.add_argument("--db-path", default="data/shadow_trading.sqlite", help="SQLite database path")
     parser.add_argument("--once", action="store_true", help="Run a single scan & fill cycle then exit")
     parser.add_argument("--report", action="store_true", help="Display performance report and exit")
+    parser.add_argument("--mark-to-market", action="store_true", help="With --report, value filled positions against executable bid depth")
     parser.add_argument("--settle-only", action="store_true", help="Only run settlement sync")
     parser.add_argument("--daemon", action="store_true", help="Run continuously as a background daemon")
     parser.add_argument("--scan-interval", type=int, default=60, help="Seconds between market scans (daemon mode)")
@@ -189,7 +210,7 @@ def main() -> None:
 
     storage = ShadowStorage(args.db_path)
     if args.report:
-        print_report(storage)
+        print_report(storage, mark_to_market=args.mark_to_market)
         return
 
     monitor = SettlementMonitor(storage)
@@ -254,6 +275,7 @@ def main() -> None:
                         max_entry_price=args.max_price,
                         top_k_per_event=1,
                     )
+                    engine.revalidate_open_orders(candidates)
                     new_orders = engine.evaluate_and_place_orders(candidates)
                     if new_orders:
                         print(f"Placed {len(new_orders)} new shadow orders.")

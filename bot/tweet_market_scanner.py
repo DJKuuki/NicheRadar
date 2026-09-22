@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -164,24 +166,51 @@ class TweetMarketScanner:
             logger.warning("Failed to list trackings for %s: %s", handle, exc)
             return None
 
-        for t in trackings:
-            # Check marketLink or slug match
-            if t.market_link and event.slug in t.market_link:
-                try:
-                    return self.xtracker.get_tracking_progress(t.id, handle=handle)
-                except Exception as exc:
-                    logger.warning("Failed to get tracking progress for %s (%s): %s", handle, t.id, exc)
-                    return None
+        # Gamma startDate is the listing date. Only an exact event link can
+        # establish the authoritative counting window; never match by end alone.
+        matches = [t for t in trackings if t.market_link and
+                   urlparse(t.market_link).path.rstrip("/") == f"/event/{event.slug}"]
+        if len(matches) != 1:
+            logger.warning("No unique exact tracking match for %s", event.slug)
+            return None
+        tracking = matches[0]
+        if abs((tracking.end_date - event.end_date).total_seconds()) > 60:
+            logger.warning("Tracking end disagrees with market for %s", event.slug)
+            return None
+        try:
+            progress = self.xtracker.get_tracking_progress(tracking.id, handle=handle)
+            event.matched_tracking_id = tracking.id
+            return progress
+        except Exception as exc:
+            logger.warning("Invalid live tracking for %s: %s", event.slug, exc)
+            return None
 
-            # Fuzzy date range match if titles correspond
-            if abs((t.end_date - event.end_date).total_seconds()) < 7200:
-                try:
-                    return self.xtracker.get_tracking_progress(t.id, handle=handle)
-                except Exception as exc:
-                    logger.warning("Failed to get tracking progress for %s (%s): %s", handle, t.id, exc)
-                    return None
-
-        return None
+    def fetch_market_quote(self, market: dict[str, Any]) -> tuple[float, float] | None:
+        """Read executable YES quotes; no synthetic spread from Gamma prices."""
+        try:
+            tokens = market.get("clobTokenIds", [])
+            outcomes = market.get("outcomes", ["Yes", "No"])
+            tokens = json.loads(tokens) if isinstance(tokens, str) else tokens
+            outcomes = json.loads(outcomes) if isinstance(outcomes, str) else outcomes
+            token = tokens[[str(x).lower() for x in outcomes].index("yes")]
+            resp = self.session.get("https://clob.polymarket.com/book",
+                                    params={"token_id": token}, timeout=self.timeout_sec)
+            resp.raise_for_status()
+            book = resp.json()
+            asks = [float(x["price"]) for x in book.get("asks", [])
+                    if float(x["size"]) > 0 and 0 < float(x["price"]) < 1]
+            bids = [float(x["price"]) for x in book.get("bids", [])
+                    if float(x["size"]) > 0 and 0 < float(x["price"]) < 1]
+            if not asks or not bids or max(bids) >= min(asks):
+                return None
+            market["_yes_token_id"] = str(token)
+            market["_tick_size"] = float(book.get("tick_size", "0.01"))
+            if not math.isfinite(market["_tick_size"]) or not 0 < market["_tick_size"] < 1:
+                return None
+            market["_quote_at_utc"] = datetime.now(timezone.utc).isoformat()
+            return min(asks), max(bids)
+        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError):
+            return None
 
     def scan_and_evaluate(
         self,
@@ -205,11 +234,13 @@ class TweetMarketScanner:
             try:
                 user_info = self.xtracker.get_user_info(handle)
                 user_id = user_info.get("id")
-                if user_id:
-                    mean_d, var_d, _ = self.xtracker.calculate_historical_daily_stats(user_id)
-                    model.update_historical_parameters(mean_d, var_d)
+                if not user_id:
+                    raise ValueError("Missing user identity")
+                mean_d, var_d, _ = self.xtracker.calculate_historical_daily_stats(user_id)
+                model.update_historical_parameters(mean_d, var_d)
             except Exception as exc:
-                logger.warning("Failed to refresh historical stats for %s: %s (continuing with current parameters)", handle, exc)
+                logger.warning("Skipping %s: invalid historical stats: %s", handle, exc)
+                continue
 
             try:
                 events = self.fetch_active_tweet_events(handle=handle, max_tenor_days=max_tenor_days)
@@ -224,39 +255,42 @@ class TweetMarketScanner:
                     logger.warning("Failed to match XTracker progress for %s: %s", ev.slug, exc)
                     progress = None
 
-                current_count = progress.current_count if progress else 0
+                if progress is None:
+                    continue
+                current_count = progress.current_count
                 now = datetime.now(timezone.utc)
-                remaining_hours = max(0.0, (ev.end_date - now).total_seconds() / 3600.0)
-
-                # Build market quotes map
-                quotes: dict[str, tuple[float | None, float | None]] = {}
-                for m in ev.markets:
-                    q = m.get("question", "")
-                    prices = m.get("outcomePrices")
-                    yes_price = None
-                    if isinstance(prices, list) and len(prices) > 0:
-                        try:
-                            yes_price = float(prices[0])
-                        except Exception:
-                            pass
-                    elif isinstance(prices, str):
-                        try:
-                            p_list = json.loads(prices)
-                            if len(p_list) > 0:
-                                yes_price = float(p_list[0])
-                        except Exception:
-                            pass
-
-                    ask = yes_price
-                    bid = max(0.01, round(yes_price - 0.02, 2)) if yes_price is not None else None
-                    quotes[q] = (ask, bid)
-
-                evaluations = model.evaluate_all_brackets(
-                    ev.brackets,
-                    current_count=current_count,
-                    remaining_hours=remaining_hours,
-                    market_quotes=quotes,
-                )
+                remaining_hours = max(0.0, (progress.tracking.end_date -
+                    max(now, progress.tracking.start_date)).total_seconds() / 3600.0)
+                if remaining_hours <= 0:
+                    continue
+                evaluations = []
+                for market in ev.markets:
+                    if market.get("closed") or market.get("acceptingOrders") is False:
+                        continue
+                    bracket = next((b for b in ev.brackets if b.name == market.get("question")), None)
+                    if bracket is None:
+                        continue
+                    quote = self.fetch_market_quote(market)
+                    if quote is None:
+                        continue
+                    ask, bid = quote
+                    evaluation = model.evaluate_bracket(
+                        bracket, current_count, remaining_hours, ask, bid,
+                        tick_size=market["_tick_size"],
+                    )
+                    market["_model_context"] = {
+                        "tracking_id": progress.tracking.id,
+                        "window_start": progress.tracking.start_date.isoformat(),
+                        "window_end": progress.tracking.end_date.isoformat(),
+                        "current_count": current_count,
+                        "remaining_hours": remaining_hours,
+                        "count_observed_at": progress.observed_at_utc,
+                        "mean_daily": model.mean_daily,
+                        "var_daily": model.var_daily,
+                        "quote_at": market["_quote_at_utc"],
+                        "quote_ask": ask, "quote_bid": bid,
+                    }
+                    evaluations.append(evaluation)
                 all_results.append((ev, progress, evaluations))
 
         return all_results
