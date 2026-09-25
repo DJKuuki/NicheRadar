@@ -193,6 +193,32 @@ def run_one_cycle(
         print("No new fills triggered.")
 
 
+def configure_network_proxy(user_proxy: str | None = None) -> None:
+    """Detect or set HTTP/HTTPS proxy for Polymarket API connectivity."""
+    import os
+    import socket
+    if user_proxy:
+        os.environ["HTTP_PROXY"] = user_proxy
+        os.environ["HTTPS_PROXY"] = user_proxy
+        print(f"🌐 Configured proxy: {user_proxy}")
+        return
+
+    if os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("ALL_PROXY"):
+        return
+
+    # Auto-detect common local proxy ports (e.g. Clash/Mihomo/v2ray on 7897, 7890, 10809, 1080)
+    for port in [7897, 7890, 10809, 1080]:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                proxy_url = f"http://127.0.0.1:{port}"
+                os.environ["HTTP_PROXY"] = proxy_url
+                os.environ["HTTPS_PROXY"] = proxy_url
+                print(f"🌐 Auto-detected local proxy at {proxy_url}, enabled for API connectivity.")
+                return
+        except (OSError, socket.timeout):
+            pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="NicheRadar Shadow Paper Trading Engine")
     parser.add_argument("--db-path", default="data/shadow_trading.sqlite", help="SQLite database path")
@@ -216,8 +242,14 @@ def main() -> None:
         default=["cz_binance", "realDonaldTrump", "elonmusk", "WhiteHouse"],
         help="Target handles to monitor (default: elonmusk realDonaldTrump cz_binance WhiteHouse)",
     )
+    parser.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP/HTTPS proxy URL (e.g. http://127.0.0.1:7897). Auto-detects local proxy if omitted.",
+    )
 
     args = parser.parse_args()
+    configure_network_proxy(args.proxy)
 
     storage = ShadowStorage(args.db_path)
     if args.report:
