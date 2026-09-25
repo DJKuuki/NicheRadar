@@ -152,6 +152,17 @@ def run_one_cycle(
     target_names = ", ".join(handles) if handles else "default targets"
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] Scanning Polymarket Social Markets (tenor <= {max_tenor_days:.1f}d) for: {target_names}...")
     scan_results = scanner.scan_and_evaluate(handles=handles, max_tenor_days=max_tenor_days)
+    
+    # Generate all candidate evaluations for hysteresis revalidation (unconstrained across all brackets)
+    all_candidates = candidates_from_scan_results(
+        scan_results,
+        min_edge=0.01,
+        min_entry_price=min_price,
+        max_entry_price=max_price,
+        top_k_per_event=None,
+    )
+    
+    # Generate Top-1 candidate per event for new order placement
     candidates = candidates_from_scan_results(
         scan_results,
         min_edge=min_edge,
@@ -161,8 +172,8 @@ def run_one_cycle(
     )
     print(f"Found {len(candidates)} trade candidates (safety corridor {min_price:.2f}-{max_price:.2f}, Top-1 per event, edge >= {min_edge:.1%}).")
 
-    # 4. Place orders subject to Top-1 mutual exclusivity
-    engine.revalidate_open_orders(candidates)
+    # 4. Revalidate resting orders using full candidate pool with hysteresis, then place new Top-1 orders
+    engine.revalidate_open_orders(all_candidates)
     new_orders = engine.evaluate_and_place_orders(candidates)
     if new_orders:
         print(f"Placed {len(new_orders)} new shadow limit orders:")
@@ -202,7 +213,7 @@ def main() -> None:
     parser.add_argument(
         "--handles",
         nargs="+",
-        default=["elonmusk", "realDonaldTrump", "cz_binance", "WhiteHouse"],
+        default=["cz_binance", "realDonaldTrump", "elonmusk", "WhiteHouse"],
         help="Target handles to monitor (default: elonmusk realDonaldTrump cz_binance WhiteHouse)",
     )
 
@@ -268,6 +279,13 @@ def main() -> None:
                         print(f"🧹 Canceled {len(stale)} stale resting limit orders (margin refunded to cash).")
 
                     scan_results = scanner.scan_and_evaluate(handles=args.handles, max_tenor_days=args.max_tenor_days)
+                    all_candidates = candidates_from_scan_results(
+                        scan_results,
+                        min_edge=0.01,
+                        min_entry_price=args.min_price,
+                        max_entry_price=args.max_price,
+                        top_k_per_event=None,
+                    )
                     candidates = candidates_from_scan_results(
                         scan_results,
                         min_edge=args.min_edge,
@@ -275,7 +293,7 @@ def main() -> None:
                         max_entry_price=args.max_price,
                         top_k_per_event=1,
                     )
-                    engine.revalidate_open_orders(candidates)
+                    engine.revalidate_open_orders(all_candidates)
                     new_orders = engine.evaluate_and_place_orders(candidates)
                     if new_orders:
                         print(f"Placed {len(new_orders)} new shadow orders.")

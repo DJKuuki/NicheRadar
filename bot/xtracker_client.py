@@ -101,7 +101,7 @@ class XTrackerClient:
             self._user_info_cache[handle] = (now, data)
             return data
         except Exception as exc:
-            if handle in self._user_info_cache and now - self._user_info_cache[handle][0] < ttl_sec:
+            if handle in self._user_info_cache:
                 logger.warning("Using stale cached user info for %s after error: %s", handle, exc)
                 return self._user_info_cache[handle][1]
             raise exc
@@ -121,7 +121,7 @@ class XTrackerClient:
             self._user_metrics_cache[user_id] = (now, data)
             return data
         except Exception as exc:
-            if user_id in self._user_metrics_cache and now - self._user_metrics_cache[user_id][0] < ttl_sec:
+            if user_id in self._user_metrics_cache:
                 logger.warning("Using stale cached metrics for %s after error: %s", user_id, exc)
                 return self._user_metrics_cache[user_id][1]
             raise exc
@@ -216,33 +216,39 @@ class XTrackerClient:
             if now - cached_time < ttl_sec:
                 return cached_val
 
-        metrics = self.get_user_metrics(user_id)
-        # Sort by date descending
-        today = datetime.now(timezone.utc).date()
-        cutoff = today - timedelta(days=lookback_days)
-        daily_items = [m for m in metrics if m.get("type") == "daily"]
-        daily_items.sort(key=lambda x: x.get("date", ""), reverse=True)
+        try:
+            metrics = self.get_user_metrics(user_id)
+            # Sort by date descending
+            today = datetime.now(timezone.utc).date()
+            cutoff = today - timedelta(days=lookback_days)
+            daily_items = [m for m in metrics if m.get("type") == "daily"]
+            daily_items.sort(key=lambda x: x.get("date", ""), reverse=True)
 
-        counts = []
-        seen_days = set()
-        for m in daily_items:
-            stamp = self._parse_iso(m.get("date"))
-            if stamp is None or not cutoff <= stamp.date() < today or stamp.date() in seen_days:
-                continue
-            c = m.get("data", {}).get("count")
-            if not isinstance(c, bool) and isinstance(c, (int, float)) and math.isfinite(c) and c >= 0 and int(c) == c:
-                counts.append(int(c))
-                seen_days.add(stamp.date())
+            counts = []
+            seen_days = set()
+            for m in daily_items:
+                stamp = self._parse_iso(m.get("date"))
+                if stamp is None or not cutoff <= stamp.date() < today or stamp.date() in seen_days:
+                    continue
+                c = m.get("data", {}).get("count")
+                if not isinstance(c, bool) and isinstance(c, (int, float)) and math.isfinite(c) and c >= 0 and int(c) == c:
+                    counts.append(int(c))
+                    seen_days.add(stamp.date())
 
-        if len(counts) < 20:
-            raise ValueError("At least 20 complete daily observations required")
+            if len(counts) < 20:
+                raise ValueError("At least 20 complete daily observations required")
 
-        n = len(counts)
-        mean_c = sum(counts) / n
-        var_c = sum((x - mean_c) ** 2 for x in counts) / (n - 1) if n > 1 else mean_c
-        res = (mean_c, var_c, counts)
-        self._stats_cache[cache_key] = (now, res)
-        return res
+            n = len(counts)
+            mean_c = sum(counts) / n
+            var_c = sum((x - mean_c) ** 2 for x in counts) / (n - 1) if n > 1 else mean_c
+            res = (mean_c, var_c, counts)
+            self._stats_cache[cache_key] = (now, res)
+            return res
+        except Exception as exc:
+            if cache_key in self._stats_cache:
+                logger.warning("Using stale cached stats for %s after error: %s", user_id, exc)
+                return self._stats_cache[cache_key][1]
+            raise exc
 
     @staticmethod
     def _parse_iso(s: str | None) -> datetime | None:

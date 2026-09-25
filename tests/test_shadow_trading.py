@@ -548,3 +548,116 @@ def test_stale_order_cancellation(temp_storage):
 
 
 
+
+
+def test_revalidate_open_orders_hysteresis(temp_storage):
+    """Verifies that minor edge fluctuations within the hysteresis band do NOT cancel open orders,
+    while severe edge degradation (< min_cancel_edge) or price inversion DOES cancel them."""
+    engine = ShadowEngine(
+        storage=temp_storage,
+        config=EngineConfig(min_edge=0.05, min_cancel_edge=0.02),
+    )
+
+    # Place an initial order on market_1 with limit 0.25, model prob 0.35 (edge = 0.10)
+    cand_initial = TradeCandidate(
+        event_id="ev_hysteresis",
+        event_slug="cz-binance-test",
+        market_id="mkt_hysteresis",
+        condition_id="0xcond_h",
+        clob_token_id="tok_h",
+        bracket_name="20-39",
+        side="BUY_YES",
+        model_prob=0.35,
+        market_prob=0.25,
+        net_edge=0.10,
+        kelly_fraction=0.05,
+        target_price=0.25,
+    )
+    placed = engine.evaluate_and_place_orders([cand_initial])
+    assert len(placed) == 1
+    assert len(temp_storage.get_open_orders()) == 1
+
+    # Case 1: In next cycle, model prob drops slightly to 0.29 (edge = 0.29 - 0.25 = 0.04).
+    # Since 0.04 >= min_cancel_edge (0.02), hysteresis holds and order must NOT be cancelled!
+    cand_minor_drop = TradeCandidate(
+        event_id="ev_hysteresis",
+        event_slug="cz-binance-test",
+        market_id="mkt_hysteresis",
+        condition_id="0xcond_h",
+        clob_token_id="tok_h",
+        bracket_name="20-39",
+        side="BUY_YES",
+        model_prob=0.29,
+        market_prob=0.25,
+        net_edge=0.04,
+        kelly_fraction=0.03,
+        target_price=0.25,
+    )
+    engine.revalidate_open_orders([cand_minor_drop])
+    assert len(temp_storage.get_open_orders()) == 1, "Order should NOT be cancelled on minor edge jitter within hysteresis band"
+
+    # Case 2: Model prob drops to 0.26 (edge = 0.26 - 0.25 = 0.01 < min_cancel_edge 0.02).
+    # Edge has severely degraded below hysteresis band -> order MUST be cancelled.
+    cand_severe_drop = TradeCandidate(
+        event_id="ev_hysteresis",
+        event_slug="cz-binance-test",
+        market_id="mkt_hysteresis",
+        condition_id="0xcond_h",
+        clob_token_id="tok_h",
+        bracket_name="20-39",
+        side="BUY_YES",
+        model_prob=0.26,
+        market_prob=0.25,
+        net_edge=0.01,
+        kelly_fraction=0.01,
+        target_price=0.25,
+    )
+    engine.revalidate_open_orders([cand_severe_drop])
+    assert len(temp_storage.get_open_orders()) == 0, "Order should be cancelled when edge drops below min_cancel_edge"
+
+
+def test_complementary_binary_fill(temp_storage):
+    """Verifies that in binary markets, a taker buying NO at price >= 1 - limit_price matches our YES bid."""
+    engine = ShadowEngine(
+        storage=temp_storage,
+        config=EngineConfig(default_fill_mode="MAKER_TOUCH"),
+    )
+
+    # Place an order to BUY_YES at limit 0.25
+    cand = TradeCandidate(
+        event_id="ev_comp",
+        event_slug="cz-binance-comp",
+        market_id="mkt_comp",
+        condition_id="0xcond_comp",
+        clob_token_id="tok_yes",
+        bracket_name="0-19",
+        side="BUY_YES",
+        model_prob=0.40,
+        market_prob=0.25,
+        net_edge=0.15,
+        kelly_fraction=0.05,
+        target_price=0.25,
+    )
+    placed = engine.evaluate_and_place_orders([cand])
+    assert len(placed) == 1
+    order = placed[0]
+
+    # In Polymarket trades tape, a taker buys NO at price 0.76 (which implies YES price = 0.24 <= 0.25!)
+    from datetime import datetime, timezone
+    now_ts = datetime.now(timezone.utc).timestamp()
+    trade_no = {
+        "timestamp": int(now_ts + 1),
+        "price": 0.76,
+        "size": 20,
+        "asset": "tok_no",
+        "conditionId": "0xcond_comp",
+        "outcome": "No",
+        "side": "BUY",
+        "transactionHash": "tx_comp_1",
+    }
+
+    engine._custom_trades_fetcher = lambda _: [trade_no]
+    fills = engine.check_and_update_fills()
+    assert len(fills) == 1
+    assert fills[0].order_id == order.order_id
+    assert fills[0].status == "FILLED"

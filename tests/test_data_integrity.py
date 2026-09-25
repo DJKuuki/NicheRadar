@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from bot.tweet_poisson_model import BracketSpec, TweetProbabilityModel
 from bot.tweet_market_scanner import ScannedTweetEvent, TweetMarketScanner
@@ -202,3 +203,17 @@ def test_version_reports_are_separate(tmp_path):
     assert analytics.evaluate("legacy").total_realized_pnl == -12.5
     assert analytics.evaluate("v3-data-integrity").settled_trades_count == 0
     assert analytics.evaluate("v3-data-integrity").filled_positions_count == 1
+
+
+def test_xtracker_stale_cache_fallback():
+    client = XTrackerClient()
+    client._user_info_cache["testuser"] = (0.0, {"id": "u123", "trackings": []})
+    client._user_metrics_cache["u123"] = (0.0, [{"type": "daily", "date": "2026-09-01T00:00:00Z", "data": {"count": 10}}])
+    client._stats_cache["u123_90"] = (0.0, (10.0, 5.0, [10]))
+
+    client._get_json_with_retry = Mock(side_effect=requests.RequestException("Connection reset"))
+
+    assert client.get_user_info("testuser", ttl_sec=0.1) == {"id": "u123", "trackings": []}
+    assert client.get_user_metrics("u123", ttl_sec=0.1) == [{"type": "daily", "date": "2026-09-01T00:00:00Z", "data": {"count": 10}}]
+    assert client.calculate_historical_daily_stats("u123", lookback_days=90, ttl_sec=0.1) == (10.0, 5.0, [10])
+

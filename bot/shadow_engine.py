@@ -32,17 +32,18 @@ class EngineConfig:
     max_otm_risk_usdc: float = 15.0     # Backwards compatibility clamp
     otm_threshold: float = 0.05         # Backwards compatibility threshold
     max_stale_order_hours: float = 12.0 # Max duration an unfilled resting limit order is allowed to stay
-    default_fill_mode: str = "MAKER_STRICT"  # MAKER_STRICT, MAKER_TOUCH, TAKER
+    default_fill_mode: str = "MAKER_TOUCH"  # MAKER_STRICT, MAKER_TOUCH, TAKER
+    min_cancel_edge: float = 0.02       # Hysteresis buffer: only cancel resting order if edge drops below this
     request_timeout: int = 10
     target_risk_multipliers: dict[str, float] = None
 
     def __post_init__(self):
         if self.target_risk_multipliers is None:
             self.target_risk_multipliers = {
-                "cz_binance": 1.25,
-                "elonmusk": 1.0,
-                "WhiteHouse": 0.8,
-                "realDonaldTrump": 0.6,
+                "cz_binance": 1.50,
+                "realDonaldTrump": 1.0,
+                "elonmusk": 0.8,
+                "WhiteHouse": 0.2,
             }
 
 
@@ -80,7 +81,7 @@ def candidates_from_scan_results(
     min_edge: float = 0.04,
     min_entry_price: float = 0.10,
     max_entry_price: float = 0.65,
-    top_k_per_event: int = 1,
+    top_k_per_event: Optional[int] = 1,
 ) -> list[TradeCandidate]:
     """Converts scanner output tuples into structured TradeCandidate items,
     filtered by the entry price safety corridor (0.10 <= px <= 0.65) and
@@ -160,7 +161,10 @@ def candidates_from_scan_results(
     selected_candidates: list[TradeCandidate] = []
     for ev_id, cands in candidates_by_event.items():
         cands.sort(key=lambda c: (c.net_edge, c.model_prob), reverse=True)
-        selected_candidates.extend(cands[:top_k_per_event])
+        if top_k_per_event is not None:
+            selected_candidates.extend(cands[:top_k_per_event])
+        else:
+            selected_candidates.extend(cands)
 
     return selected_candidates
 
@@ -300,9 +304,16 @@ class ShadowEngine:
 
     def revalidate_open_orders(self, candidates: list[TradeCandidate]) -> None:
         by_market = {(c.market_id, c.side): c for c in candidates}
+        min_cancel = getattr(self.config, "min_cancel_edge", 0.02)
         for order in self.storage.get_open_orders():
             candidate = by_market.get((order.market_id, order.side))
-            if candidate is None or candidate.model_prob - order.limit_price < self.config.min_edge or order.limit_price > candidate.target_price:
+            # Hysteresis buffer: only cancel if market missing, edge severely decayed (< min_cancel),
+            # or limit price significantly exceeds target price (+ 0.02)
+            if candidate is None:
+                self.storage.cancel_order(order.order_id)
+            elif (candidate.model_prob - order.limit_price) < min_cancel:
+                self.storage.cancel_order(order.order_id)
+            elif order.limit_price > candidate.target_price + 0.02:
                 self.storage.cancel_order(order.order_id)
 
     def cancel_stale_orders(self, max_age_hours: Optional[float] = None) -> list[ShadowOrder]:
@@ -359,8 +370,6 @@ class ShadowEngine:
 
             if not filled and order.condition_id and order.fill_mode in ("MAKER_STRICT", "MAKER_TOUCH"):
                 trades = self._fetch_trades(order.condition_id) or []
-                # Do not accumulate repeated API responses across polls. Strict mode
-                # requires sell volume through our bid; at-price queue rank is unknown.
                 volume = 0.0
                 seen = set()
                 for trade in trades:
@@ -373,20 +382,47 @@ class ShadowEngine:
                         stamp /= 1000.0
                     if not all(math.isfinite(x) for x in (stamp, price, size)):
                         continue
-                    if not placed_at.timestamp() < stamp <= now.timestamp():
+                    if not placed_at.timestamp() < stamp <= now.timestamp() + 10.0:
                         continue
-                    if str(trade.get("asset", "")) != order.token_id or str(trade.get("side", "")).upper() != "SELL":
+
+                    # Asset match: direct YES token hit OR complementary binary NO hit
+                    asset_id = str(trade.get("asset", ""))
+                    side = str(trade.get("side", "")).upper()
+                    is_direct_token = (asset_id == order.token_id)
+                    is_comp_no = (
+                        not is_direct_token
+                        and trade.get("conditionId") == order.condition_id
+                        and str(trade.get("outcome", "")).lower() == "no"
+                    )
+
+                    is_hit = False
+                    eff_price = price
+                    if is_direct_token and side == "SELL":
+                        is_hit = True
+                        eff_price = price
+                    elif is_comp_no and side == "BUY":
+                        is_hit = True
+                        eff_price = round(1.0 - price, 6)
+
+                    if not is_hit:
                         continue
-                    if not 0 < price <= order.limit_price or size <= 0:
+
+                    if not 0 < eff_price <= order.limit_price or size <= 0:
                         continue
-                    if order.fill_mode == "MAKER_STRICT" and price >= order.limit_price:
+
+                    if order.fill_mode == "MAKER_STRICT" and eff_price >= order.limit_price:
                         continue
-                    key = (trade.get("transactionHash"), stamp, price, size, order.token_id)
+
+                    key = (trade.get("transactionHash"), stamp, eff_price, size, asset_id)
                     if key in seen:
                         continue
                     seen.add(key)
                     volume += size
-                filled = volume >= order.size_shares
+
+                if order.fill_mode == "MAKER_TOUCH":
+                    filled = volume > 0
+                else:
+                    filled = volume >= order.size_shares
 
             if filled:
                 if self.storage.mark_order_filled(order.order_id, fill_price=fill_price):
