@@ -289,6 +289,12 @@ class TweetMarketScanner:
                         "var_daily": model.var_daily,
                         "quote_at": market["_quote_at_utc"],
                         "quote_ask": ask, "quote_bid": bid,
+                        "rewardsMinSize": market.get("rewardsMinSize", 0),
+                        "rewardsMaxSpread": market.get("rewardsMaxSpread", 0),
+                        "holdingRewardsEnabled": market.get("holdingRewardsEnabled", False),
+                        "feesEnabled": market.get("feesEnabled", False),
+                        "feeType": market.get("feeType", "zero_fees"),
+                        "feeSchedule": market.get("feeSchedule", {}),
                     }
                     evaluations.append(evaluation)
                 all_results.append((ev, progress, evaluations))

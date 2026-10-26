@@ -127,6 +127,7 @@ def run_one_cycle(
     max_price: float = 0.65,
     max_tenor_days: float = 8.0,
     max_stale_hours: float = 12.0,
+    include_weather: bool = False,
 ) -> None:
     # 1. Sync settlements first (releases cash & margin from resolved events)
     print("Syncing market settlements from Gamma API...")
@@ -172,13 +173,27 @@ def run_one_cycle(
     )
     print(f"Found {len(candidates)} trade candidates (safety corridor {min_price:.2f}-{max_price:.2f}, Top-1 per event, edge >= {min_edge:.1%}).")
 
+    if include_weather:
+        from bot.weather_market_scanner import WeatherMarketScanner, candidates_from_weather_results
+        print("🌤️ Scanning Polymarket Daily Temperature Markets (Open-Meteo GFS/ECMWF/ICON ensemble)...")
+        w_scanner = WeatherMarketScanner()
+        w_results = w_scanner.scan_and_evaluate(max_pages=4)
+        w_all = candidates_from_weather_results(w_results, min_edge=0.01, min_entry_price=min_price, max_entry_price=max_price, top_k_per_event=None)
+        w_top = candidates_from_weather_results(w_results, min_edge=min_edge, min_entry_price=min_price, max_entry_price=max_price, top_k_per_event=1)
+        print(f"Found {len(w_top)} weather trade candidates across {len(w_results)} active station events.")
+        all_candidates.extend(w_all)
+        candidates.extend(w_top)
+
     # 4. Revalidate resting orders using full candidate pool with hysteresis, then place new Top-1 orders
     engine.revalidate_open_orders(all_candidates)
     new_orders = engine.evaluate_and_place_orders(candidates)
     if new_orders:
         print(f"Placed {len(new_orders)} new shadow limit orders:")
         for o in new_orders:
-            print(f"  + [{o.side}] {o.event_slug} ({o.bracket_name}) @ {o.limit_price:.3f}, {o.size_shares} shares (${o.cost_usdc:.2f})")
+            import json as _json
+            _m = _json.loads(o.metadata_json) if o.metadata_json else {}
+            _rw = f" [🎁 Reward Q={_m.get('reward_q_score', 0):.2f}]" if _m.get("liquidity_reward_eligible") else ""
+            print(f"  + [{o.side}] {o.event_slug} ({o.bracket_name}) @ {o.limit_price:.3f}, {o.size_shares} shares (${o.cost_usdc:.2f}){_rw}")
     else:
         print("No new orders placed (either no edge, below min size, or already active).")
 
@@ -226,6 +241,8 @@ def main() -> None:
     parser.add_argument("--report", action="store_true", help="Display performance report and exit")
     parser.add_argument("--mark-to-market", action="store_true", help="With --report, value filled positions against executable bid depth")
     parser.add_argument("--settle-only", action="store_true", help="Only run settlement sync")
+    parser.add_argument("--scan-logical-arb", action="store_true", help="Scan Polymarket for Logical Dependency & Monotonicity arbitrage")
+    parser.add_argument("--scan-weather", action="store_true", help="Include Daily Temperature markets (Open-Meteo multi-model) in scan")
     parser.add_argument("--daemon", action="store_true", help="Run continuously as a background daemon")
     parser.add_argument("--scan-interval", type=int, default=60, help="Seconds between market scans (daemon mode)")
     parser.add_argument("--fill-interval", type=int, default=30, help="Seconds between fill checks (daemon mode)")
@@ -255,6 +272,20 @@ def main() -> None:
     if args.report:
         print_report(storage, mark_to_market=args.mark_to_market)
         return
+
+    if args.scan_logical_arb:
+        from bot.logical_arb_scanner import LogicalArbScanner
+        print("🔍 Scanning Polymarket for Logical Dependency & Monotonicity Arbitrage...")
+        arb_scanner = LogicalArbScanner()
+        opps, invs = arb_scanner.scan_all(max_pages=8, min_edge=0.002, verify_clob=True)
+        print(f"\nFound {len(opps)} CLOB-Verified Logical Arbitrage Opportunities:")
+        for o in opps[:15]:
+            print(f"  * [{o.arb_type}] {o.event_slug} | Cost={o.total_cost_per_unit:.4f} -> Guaranteed Payout=${o.guaranteed_payout:.2f} (Max=${o.max_payout:.2f}) | Edge={o.guaranteed_net_edge:.2%} | MaxUnits={o.executable_units:.1f} (${o.guaranteed_profit_usdc:.2f}) | {o.notes}")
+        print(f"\nFound {len(invs)} Midpoint Monotonicity Inversions (Maker Relative-Value Candidates):")
+        for inv in invs[:15]:
+            print(f"  ~ [{inv.anomaly_type}] {inv.event_slug} | Subset Mid={inv.subset_mid:.3f} > Superset Mid={inv.superset_mid:.3f} (Spread={inv.inversion_spread:.3f}, TakerCost={inv.taker_arb_cost:.3f})")
+        if not args.once and not args.daemon and not args.scan_weather:
+            return
 
     monitor = SettlementMonitor(storage)
     if args.settle_only:
@@ -287,6 +318,7 @@ def main() -> None:
             max_price=args.max_price,
             max_tenor_days=args.max_tenor_days,
             max_stale_hours=args.stale_hours,
+            include_weather=args.scan_weather,
         )
         print_report(storage)
         return

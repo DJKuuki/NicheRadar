@@ -34,6 +34,7 @@ class EngineConfig:
     max_stale_order_hours: float = 12.0 # Max duration an unfilled resting limit order is allowed to stay
     default_fill_mode: str = "MAKER_TOUCH"  # MAKER_STRICT, MAKER_TOUCH, TAKER
     min_cancel_edge: float = 0.02       # Hysteresis buffer: only cancel resting order if edge drops below this
+    enable_reward_size_bump: bool = True
     request_timeout: int = 10
     target_risk_multipliers: dict[str, float] = None
 
@@ -44,6 +45,7 @@ class EngineConfig:
                 "realDonaldTrump": 1.0,
                 "elonmusk": 0.8,
                 "WhiteHouse": 0.2,
+                "weather": 1.0,
             }
 
 
@@ -73,6 +75,8 @@ def detect_handle_from_slug(slug: str) -> str:
         return "realDonaldTrump"
     if "white-house" in slug_lower or "whitehouse" in slug_lower:
         return "WhiteHouse"
+    if "temperature" in slug_lower or "weather" in slug_lower:
+        return "weather"
     return "elonmusk"
 
 
@@ -264,6 +268,28 @@ class ShadowEngine:
                 continue
 
             shares = math.floor(risk_usdc / limit_price * 100) / 100
+            reward_meta: dict[str, Any] = {}
+            if cand.metadata and "quote_bid" in cand.metadata and "quote_ask" in cand.metadata:
+                from bot.rewards_analyzer import RewardsAnalyzer
+                r_spec = RewardsAnalyzer.extract_reward_spec(cand.metadata)
+                max_cap = min(self.config.max_bracket_risk_usdc * mult, self.config.max_event_risk_usdc, available_cash)
+                r_eval = RewardsAnalyzer.evaluate_maker_order(
+                    limit_price=limit_price,
+                    size_shares=shares,
+                    quote_bid=float(cand.metadata["quote_bid"]),
+                    quote_ask=float(cand.metadata["quote_ask"]),
+                    spec=r_spec,
+                    max_cost_usdc=max_cap if self.config.enable_reward_size_bump else None,
+                )
+                if r_eval.size_bumped_for_reward and r_eval.recommended_size_shares * limit_price <= available_cash:
+                    shares = r_eval.recommended_size_shares
+                reward_meta = {
+                    "liquidity_reward_eligible": r_eval.qualifies_for_liquidity_reward,
+                    "reward_q_score": r_eval.quadratic_score_factor,
+                    "reward_weighted_units": r_eval.weighted_reward_units,
+                    "maker_rebate_usdc": r_eval.maker_rebate_usdc_on_fill,
+                    "size_bumped_for_reward": r_eval.size_bumped_for_reward,
+                }
             actual_cost = round(shares * limit_price, 4)
             if actual_cost > available_cash:
                 continue
@@ -286,6 +312,7 @@ class ShadowEngine:
                 metadata_json=json.dumps(
                     {
                         **cand.metadata,
+                        **reward_meta,
                         "strategy_version": "v3-data-integrity",
                         "model_prob": cand.model_prob,
                         "market_prob": cand.market_prob,
