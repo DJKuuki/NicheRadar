@@ -193,6 +193,10 @@ class XTrackerClient:
                         bucket_sync = updated_dt
                     else:
                         bucket_sync = now
+            if bucket_sync is None and now < target_tracking.start_date and detail.get("stats", {}).get("total") == 0:
+                updated_dt = self._parse_iso(detail.get("user", {}).get("updatedAt"))
+                if updated_dt is not None and -60 <= (now - updated_dt).total_seconds() <= 900:
+                    bucket_sync = updated_dt
             if bucket_sync is None:
                 raise ValueError("Missing or stale live tracking data")
             synced = bucket_sync

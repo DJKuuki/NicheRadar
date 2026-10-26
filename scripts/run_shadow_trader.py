@@ -158,8 +158,8 @@ def run_one_cycle(
     all_candidates = candidates_from_scan_results(
         scan_results,
         min_edge=0.01,
-        min_entry_price=min_price,
-        max_entry_price=max_price,
+        min_entry_price=0.01,
+        max_entry_price=0.99,
         top_k_per_event=None,
     )
     
@@ -178,7 +178,7 @@ def run_one_cycle(
         print("🌤️ Scanning Polymarket Daily Temperature Markets (Open-Meteo GFS/ECMWF/ICON ensemble)...")
         w_scanner = WeatherMarketScanner()
         w_results = w_scanner.scan_and_evaluate(max_pages=4)
-        w_all = candidates_from_weather_results(w_results, min_edge=0.01, min_entry_price=min_price, max_entry_price=max_price, top_k_per_event=None)
+        w_all = candidates_from_weather_results(w_results, min_edge=0.01, min_entry_price=0.01, max_entry_price=0.99, top_k_per_event=None)
         w_top = candidates_from_weather_results(w_results, min_edge=min_edge, min_entry_price=min_price, max_entry_price=max_price, top_k_per_event=1)
         print(f"Found {len(w_top)} weather trade candidates across {len(w_results)} active station events.")
         all_candidates.extend(w_all)
@@ -346,8 +346,8 @@ def main() -> None:
                     all_candidates = candidates_from_scan_results(
                         scan_results,
                         min_edge=0.01,
-                        min_entry_price=args.min_price,
-                        max_entry_price=args.max_price,
+                        min_entry_price=0.01,
+                        max_entry_price=0.99,
                         top_k_per_event=None,
                     )
                     candidates = candidates_from_scan_results(
@@ -359,14 +359,16 @@ def main() -> None:
                     )
                     if args.scan_weather:
                         from bot.weather_market_scanner import WeatherMarketScanner, candidates_from_weather_results
-                        w_scanner = WeatherMarketScanner()
-                        w_results = w_scanner.scan_and_evaluate(max_pages=4)
+                        if not hasattr(scanner, "_w_scanner") or now - getattr(scanner, "_w_cache_ts", 0.0) >= 1800:
+                            scanner._w_scanner = WeatherMarketScanner()
+                            scanner._w_cache_ts = now
+                        w_results = scanner._w_scanner.scan_and_evaluate(max_pages=4)
                         all_candidates.extend(
                             candidates_from_weather_results(
                                 w_results,
                                 min_edge=0.01,
-                                min_entry_price=args.min_price,
-                                max_entry_price=args.max_price,
+                                min_entry_price=0.01,
+                                max_entry_price=0.99,
                                 top_k_per_event=None,
                             )
                         )

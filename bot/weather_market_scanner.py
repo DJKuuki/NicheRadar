@@ -512,6 +512,8 @@ class WeatherMarketScanner:
                 bracket: TempBracketSpec | None = m.get("_parsed_temp_bracket")
                 if bracket is None:
                     continue
+                if self.model.bracket_probability(bracket, forecast.mean_temp, forecast.std_temp) < 0.015:
+                    continue
                 quote = self.fetch_market_quote(m)
                 if quote is None:
                     continue

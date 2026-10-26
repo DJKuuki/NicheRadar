@@ -340,7 +340,7 @@ class ShadowEngine:
                 self.storage.cancel_order(order.order_id)
             elif (candidate.model_prob - order.limit_price) < min_cancel:
                 self.storage.cancel_order(order.order_id)
-            elif order.limit_price > candidate.target_price + 0.02:
+            elif order.limit_price > candidate.target_price + 0.02 or (order.limit_price <= candidate.target_price - 0.01 + 1e-9 and self.config.min_entry_price <= candidate.target_price <= self.config.max_entry_price and candidate.net_edge >= self.config.min_edge):
                 self.storage.cancel_order(order.order_id)
 
     def cancel_stale_orders(self, max_age_hours: Optional[float] = None) -> list[ShadowOrder]:
