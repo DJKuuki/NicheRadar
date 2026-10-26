@@ -357,6 +357,28 @@ def main() -> None:
                         max_entry_price=args.max_price,
                         top_k_per_event=1,
                     )
+                    if args.scan_weather:
+                        from bot.weather_market_scanner import WeatherMarketScanner, candidates_from_weather_results
+                        w_scanner = WeatherMarketScanner()
+                        w_results = w_scanner.scan_and_evaluate(max_pages=4)
+                        all_candidates.extend(
+                            candidates_from_weather_results(
+                                w_results,
+                                min_edge=0.01,
+                                min_entry_price=args.min_price,
+                                max_entry_price=args.max_price,
+                                top_k_per_event=None,
+                            )
+                        )
+                        candidates.extend(
+                            candidates_from_weather_results(
+                                w_results,
+                                min_edge=args.min_edge,
+                                min_entry_price=args.min_price,
+                                max_entry_price=args.max_price,
+                                top_k_per_event=1,
+                            )
+                        )
                     engine.revalidate_open_orders(all_candidates)
                     new_orders = engine.evaluate_and_place_orders(candidates)
                     if new_orders:
