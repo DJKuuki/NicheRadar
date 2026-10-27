@@ -183,15 +183,11 @@ class XTrackerClient:
                     isinstance(b.get("count"), (int, float)) and b.get("count", 0) > 0
                     for b in daily_buckets[-24:]
                 )
-                if (
-                    last_bucket_dt is not None
-                    and -60 <= (now - last_bucket_dt).total_seconds() <= 3900
-                    and has_recent_activity
-                ):
-                    updated_dt = self._parse_iso(detail.get("user", {}).get("updatedAt"))
+                updated_dt = self._parse_iso(detail.get("user", {}).get("updatedAt"))
+                if last_bucket_dt is not None and -60 <= (now - last_bucket_dt).total_seconds() <= 3900:
                     if updated_dt is not None and -60 <= (now - updated_dt).total_seconds() <= 900:
                         bucket_sync = updated_dt
-                    else:
+                    elif has_recent_activity:
                         bucket_sync = now
             if bucket_sync is None and now < target_tracking.start_date and detail.get("stats", {}).get("total") == 0:
                 updated_dt = self._parse_iso(detail.get("user", {}).get("updatedAt"))
