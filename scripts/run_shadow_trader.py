@@ -153,6 +153,7 @@ def run_one_cycle(
     target_names = ", ".join(handles) if handles else "default targets"
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC] Scanning Polymarket Social Markets (tenor <= {max_tenor_days:.1f}d) for: {target_names}...")
     scan_results = scanner.scan_and_evaluate(handles=handles, max_tenor_days=max_tenor_days)
+    scanned_event_ids: set[str] = {ev.event_id for ev, _, _ in scan_results}
     
     # Generate all candidate evaluations for hysteresis revalidation (unconstrained across all brackets)
     all_candidates = candidates_from_scan_results(
@@ -183,9 +184,10 @@ def run_one_cycle(
         print(f"Found {len(w_top)} weather trade candidates across {len(w_results)} active station events.")
         all_candidates.extend(w_all)
         candidates.extend(w_top)
+        scanned_event_ids.update(ev.event_id for ev, _, _ in w_results)
 
     # 4. Revalidate resting orders using full candidate pool with hysteresis, then place new Top-1 orders
-    engine.revalidate_open_orders(all_candidates)
+    engine.revalidate_open_orders(all_candidates, scanned_event_ids=scanned_event_ids)
     new_orders = engine.evaluate_and_place_orders(candidates)
     if new_orders:
         print(f"Placed {len(new_orders)} new shadow limit orders:")
@@ -343,6 +345,7 @@ def main() -> None:
                         print(f"🧹 Canceled {len(stale)} stale resting limit orders (margin refunded to cash).")
 
                     scan_results = scanner.scan_and_evaluate(handles=args.handles, max_tenor_days=args.max_tenor_days)
+                    scanned_event_ids: set[str] = {ev.event_id for ev, _, _ in scan_results}
                     all_candidates = candidates_from_scan_results(
                         scan_results,
                         min_edge=0.01,
@@ -381,7 +384,8 @@ def main() -> None:
                                 top_k_per_event=1,
                             )
                         )
-                    engine.revalidate_open_orders(all_candidates)
+                        scanned_event_ids.update(ev.event_id for ev, _, _ in w_results)
+                    engine.revalidate_open_orders(all_candidates, scanned_event_ids=scanned_event_ids)
                     new_orders = engine.evaluate_and_place_orders(candidates)
                     if new_orders:
                         print(f"Placed {len(new_orders)} new shadow orders.")

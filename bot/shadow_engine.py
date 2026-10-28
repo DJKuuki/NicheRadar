@@ -329,18 +329,26 @@ class ShadowEngine:
 
         return placed_orders
 
-    def revalidate_open_orders(self, candidates: list[TradeCandidate]) -> None:
+    def revalidate_open_orders(
+        self,
+        candidates: list[TradeCandidate],
+        scanned_event_ids: Optional[set[str]] = None,
+    ) -> None:
+        if not candidates and scanned_event_ids is None:
+            return
+
         by_market = {(c.market_id, c.side): c for c in candidates}
         min_cancel = getattr(self.config, "min_cancel_edge", 0.02)
         for order in self.storage.get_open_orders():
+            if scanned_event_ids is not None and order.event_id not in scanned_event_ids:
+                continue
+
             candidate = by_market.get((order.market_id, order.side))
-            # Hysteresis buffer: only cancel if market missing, edge severely decayed (< min_cancel),
-            # or limit price significantly exceeds target price (+ 0.02)
             if candidate is None:
                 self.storage.cancel_order(order.order_id)
             elif (candidate.model_prob - order.limit_price) < min_cancel:
                 self.storage.cancel_order(order.order_id)
-            elif order.limit_price > candidate.target_price + 0.02 or (order.limit_price <= candidate.target_price - 0.01 + 1e-9 and self.config.min_entry_price <= candidate.target_price <= self.config.max_entry_price and candidate.net_edge >= self.config.min_edge):
+            elif order.limit_price > candidate.target_price + 0.04:
                 self.storage.cancel_order(order.order_id)
 
     def cancel_stale_orders(self, max_age_hours: Optional[float] = None) -> list[ShadowOrder]:

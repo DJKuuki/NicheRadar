@@ -422,10 +422,26 @@ class WeatherMarketScanner:
             if not parsed:
                 continue
             station, target_dt, metric = parsed
-            if target_dt < now.date():
-                continue
+            import zoneinfo
+            try:
+                st_tz = zoneinfo.ZoneInfo(station.timezone)
+                station_now = datetime.now(st_tz)
+                station_today = station_now.date()
+            except Exception:
+                station_today = now.date()
 
             end_iso = e.get("endDate")
+            try:
+                end_dt = datetime.fromisoformat(str(end_iso).replace("Z", "+00:00")) if end_iso else now
+            except Exception:
+                end_dt = now
+
+            rem_hours = (end_dt - now).total_seconds() / 3600.0
+            # Lead-time safety cutoff: do NOT enter weather markets where the target day
+            # is already in progress or remaining time < 18 hours, because intraday live METAR
+            # observations cause severe adverse selection against static NWP forecast models.
+            if target_dt <= station_today or rem_hours < 18.0:
+                continue
             try:
                 end_dt = datetime.fromisoformat(str(end_iso).replace("Z", "+00:00")) if end_iso else now
             except Exception:
